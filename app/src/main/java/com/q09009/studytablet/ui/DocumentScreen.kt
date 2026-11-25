@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
@@ -69,6 +70,7 @@ fun DocumentScreen(vm: AppViewModel, doc: OpenDoc, onBack: () -> Unit) {
                     }
                     IconButton(onClick = zoom::zoomOut) { Icon(Icons.Default.ZoomOut, "축소") }
                     IconButton(onClick = zoom::zoomIn) { Icon(Icons.Default.ZoomIn, "확대") }
+                    IconButton(onClick = zoom::reset) { Icon(Icons.Default.FitScreen, "100%") }
                 },
             )
         },
@@ -124,7 +126,7 @@ private fun SidePanel(vm: AppViewModel, doc: OpenDoc, modifier: Modifier) {
 @Composable
 private fun SummaryPanel(vm: AppViewModel, doc: OpenDoc, modifier: Modifier) {
     val s by vm.summary.collectAsState()
-    val account by vm.account.collectAsState()
+    val apiKey by vm.apiKey.collectAsState()
     val context = LocalContext.current
 
     Column(modifier.padding(16.dp)) {
@@ -134,7 +136,7 @@ private fun SummaryPanel(vm: AppViewModel, doc: OpenDoc, modifier: Modifier) {
                 Text(s.status.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                 OutlinedButton(onClick = vm::cancelSummary) { Text("취소") }
             } else {
-                Button(onClick = vm::summarize, enabled = account != null) {
+                Button(onClick = vm::summarize, enabled = apiKey != null) {
                     Icon(Icons.Default.AutoAwesome, null)
                     Spacer(Modifier.width(8.dp))
                     Text(if (s.markdown == null) "AI 요약 만들기" else "다시 요약")
@@ -151,8 +153,8 @@ private fun SummaryPanel(vm: AppViewModel, doc: OpenDoc, modifier: Modifier) {
                 }
             }
         }
-        if (account == null) {
-            Text("홈 화면에서 ChatGPT로 로그인하면 요약을 만들 수 있습니다.",
+        if (apiKey == null) {
+            Text("홈 화면에서 OpenAI API 키를 등록하면 요약을 만들 수 있습니다.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp))
         }

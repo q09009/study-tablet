@@ -1,4 +1,4 @@
-package com.q09009.studytablet.data
+﻿package com.q09009.studytablet.data
 
 import android.content.Context
 import android.net.Uri
@@ -57,7 +57,7 @@ class Store(context: Context) {
     fun recordingsDir(uri: Uri): File = File(docDir(uri), "recordings").apply { mkdirs() }
 
     companion object {
-        const val DEFAULT_MODEL = "gpt-5"
+        const val DEFAULT_MODEL = "gpt-5-mini"
 
         fun docKey(uri: Uri): String {
             val digest = MessageDigest.getInstance("SHA-256").digest(uri.toString().toByteArray())

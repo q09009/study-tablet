@@ -18,11 +18,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -30,7 +28,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -47,9 +44,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.q09009.studytablet.ai.CodexUsage
-import com.q09009.studytablet.ai.UsageWindow
+import com.q09009.studytablet.ai.TokenUsage
 import java.text.DateFormat
 import java.util.Date
 
@@ -118,39 +123,57 @@ private fun HomeScreen(vm: AppViewModel, onOpenPdf: () -> Unit) {
 
 @Composable
 private fun AccountCard(vm: AppViewModel, modifier: Modifier = Modifier) {
-    val account by vm.account.collectAsState()
+    val apiKey by vm.apiKey.collectAsState()
     val usage by vm.usage.collectAsState()
-    val busy by vm.loginBusy.collectAsState()
-    val error by vm.loginError.collectAsState()
+    val busy by vm.keyBusy.collectAsState()
+    val error by vm.keyError.collectAsState()
     val model by vm.model.collectAsState()
     var modelText by remember(model) { mutableStateOf(model) }
+    var keyText by remember { mutableStateOf("") }
+    val uriHandler = LocalUriHandler.current
 
     Card(modifier) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("ChatGPT 계정 (Codex)", style = MaterialTheme.typography.titleMedium)
-            val acc = account
-            if (acc == null) {
-                Text("ChatGPT 플랜으로 로그인하면 Codex 사용량으로 PDF를 요약합니다.",
+        Column(
+            Modifier.padding(20.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("OpenAI API", style = MaterialTheme.typography.titleMedium)
+            val key = apiKey
+            if (key == null) {
+                Text("OpenAI 공식 API 키를 등록하면 PDF를 AI로 요약합니다. 키는 기기 안에 암호화되어 저장됩니다.",
                     style = MaterialTheme.typography.bodyMedium)
-                if (busy) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(12.dp))
-                        Text("브라우저에서 로그인을 완료하세요…", Modifier.weight(1f))
-                        OutlinedButton(onClick = vm::cancelLogin) { Text("취소") }
+                OutlinedTextField(
+                    value = keyText,
+                    onValueChange = { keyText = it },
+                    label = { Text("API 키 (sk-...)") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(onClick = { vm.saveApiKey(keyText) }, enabled = !busy && keyText.isNotBlank()) {
+                        if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        else Text("확인 후 저장")
                     }
-                } else {
-                    Button(onClick = vm::login, modifier = Modifier.fillMaxWidth()) { Text("ChatGPT로 로그인") }
+                    OutlinedButton(onClick = { uriHandler.openUri("https://platform.openai.com/api-keys") }) {
+                        Icon(Icons.AutoMirrored.Filled.OpenInNew, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("키 발급")
+                    }
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             } else {
-                Text(acc.email ?: "로그인됨", fontWeight = FontWeight.SemiBold)
-                acc.planType?.let { Text("플랜: $it", style = MaterialTheme.typography.bodySmall) }
-                UsageSection(usage, onRefresh = vm::refreshUsage)
-                OutlinedButton(onClick = vm::logout) {
-                    Icon(Icons.AutoMirrored.Filled.Logout, null)
+                Text("연결됨 · ${key.take(7)}…${key.takeLast(4)}", fontWeight = FontWeight.SemiBold)
+                UsageSection(
+                    usage,
+                    onOpenDashboard = { uriHandler.openUri("https://platform.openai.com/usage") },
+                    onReset = vm::resetUsage,
+                )
+                OutlinedButton(onClick = { keyText = ""; vm.removeApiKey() }) {
+                    Icon(Icons.Default.Delete, null)
                     Spacer(Modifier.width(8.dp))
-                    Text("로그아웃")
+                    Text("키 삭제")
                 }
             }
             OutlinedTextField(
@@ -159,7 +182,7 @@ private fun AccountCard(vm: AppViewModel, modifier: Modifier = Modifier) {
                 label = { Text("모델") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                supportingText = { Text("예: gpt-5, gpt-5-codex") },
+                supportingText = { Text("예: gpt-5-mini, gpt-5, gpt-4.1-mini") },
             )
             if (modelText != model) {
                 Button(onClick = { vm.setModel(modelText) }) { Text("모델 저장") }
@@ -169,41 +192,16 @@ private fun AccountCard(vm: AppViewModel, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun UsageSection(usage: CodexUsage?, onRefresh: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("사용량", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-            IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, "새로고침") }
-        }
-        if (usage == null || (usage.primary == null && usage.secondary == null)) {
-            Text("사용량 정보 없음 (요약을 한 번 실행하면 표시됩니다)",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } else {
-            usage.primary?.let { UsageBar("단기 한도", it) }
-            usage.secondary?.let { UsageBar("주간 한도", it) }
+private fun UsageSection(usage: TokenUsage, onOpenDashboard: () -> Unit, onReset: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("이 기기 사용량 (토큰)", style = MaterialTheme.typography.labelLarge)
+        Text("오늘: 입력 ${fmt(usage.todayInput)} · 출력 ${fmt(usage.todayOutput)}", style = MaterialTheme.typography.bodySmall)
+        Text("이번 달: 입력 ${fmt(usage.monthInput)} · 출력 ${fmt(usage.monthOutput)}", style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onOpenDashboard) { Text("전체 사용량·비용 보기") }
+            TextButton(onClick = onReset) { Text("초기화") }
         }
     }
 }
 
-@Composable
-private fun UsageBar(label: String, w: UsageWindow) {
-    Column {
-        val reset = w.resetsInSeconds?.let { " · ${formatDuration(it)} 후 초기화" }.orEmpty()
-        Text("$label: ${"%.0f".format(w.usedPercent)}% 사용$reset", style = MaterialTheme.typography.bodySmall)
-        LinearProgressIndicator(
-            progress = { (w.usedPercent / 100.0).toFloat().coerceIn(0f, 1f) },
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        )
-    }
-}
-
-private fun formatDuration(seconds: Long): String {
-    val h = seconds / 3600
-    val m = (seconds % 3600) / 60
-    return when {
-        h >= 24 -> "${h / 24}일 ${h % 24}시간"
-        h > 0 -> "${h}시간 ${m}분"
-        else -> "${m}분"
-    }
-}
+private fun fmt(n: Long): String = "%,d".format(n)

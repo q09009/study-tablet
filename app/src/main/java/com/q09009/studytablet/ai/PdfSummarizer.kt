@@ -1,4 +1,4 @@
-package com.q09009.studytablet.ai
+﻿package com.q09009.studytablet.ai
 
 import android.content.Context
 import android.net.Uri
@@ -45,7 +45,7 @@ object PdfSummarizer {
     suspend fun summarize(
         context: Context,
         uri: Uri,
-        client: CodexClient,
+        client: OpenAIClient,
         model: String,
         onProgress: (String) -> Unit,
         onPartial: (String) -> Unit,
