@@ -9,7 +9,6 @@ import com.q09009.studytablet.ai.CodexClient
 import com.q09009.studytablet.ai.PdfSummarizer
 import com.q09009.studytablet.auth.CodexAuth
 import com.q09009.studytablet.data.RecentDoc
-import com.q09009.studytablet.data.SecretStore
 import com.q09009.studytablet.data.Store
 import com.q09009.studytablet.update.ReleaseInfo
 import com.q09009.studytablet.update.Updater
@@ -63,36 +62,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var summaryJob: Job? = null
 
     val updater = Updater(app, http)
-    private val ghToken = SecretStore(app, "github_token")
-    val hasGhToken = ghToken.value
     private val _update = MutableStateFlow(UpdateState())
     val update: StateFlow<UpdateState> = _update
     private var updateJob: Job? = null
 
     init {
         if (account.value != null) refreshUsage()
-        if (ghToken.value.value != null) checkUpdate(silent = true)
-    }
-
-    fun saveGhToken(raw: String) {
-        val token = raw.trim()
-        if (token.isEmpty()) return
-        ghToken.save(token)
-        checkUpdate()
-    }
-
-    fun removeGhToken() {
-        ghToken.clear()
-        _update.value = UpdateState()
+        checkUpdate(silent = true)
     }
 
     fun checkUpdate(silent: Boolean = false) {
-        val token = ghToken.value.value ?: return
         if (updateJob?.isActive == true) return
         updateJob = viewModelScope.launch {
             _update.value = UpdateState(checking = true)
             _update.value = try {
-                val r = updater.latest(token)
+                val r = updater.latest()
                 UpdateState(release = r.takeIf(updater::isNewer), upToDate = !updater.isNewer(r))
             } catch (e: CancellationException) {
                 throw e
@@ -104,14 +88,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Returns false when the user must first allow installs from this app. */
     fun installUpdate(): Boolean {
-        val token = ghToken.value.value ?: return true
         val release = _update.value.release ?: return true
         if (!updater.canInstall()) return false
         if (updateJob?.isActive == true) return true
         updateJob = viewModelScope.launch {
             _update.update { it.copy(progress = 0f, error = null) }
             try {
-                val apk = updater.download(token, release) { p -> _update.update { it.copy(progress = p) } }
+                val apk = updater.download(release) { p -> _update.update { it.copy(progress = p) } }
                 updater.install(apk)
                 _update.update { it.copy(progress = null) }
             } catch (e: CancellationException) {

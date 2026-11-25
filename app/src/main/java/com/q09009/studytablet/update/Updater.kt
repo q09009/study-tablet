@@ -20,22 +20,21 @@ import java.io.IOException
 
 data class ReleaseInfo(val tag: String, val version: String, val notes: String, val assetUrl: String, val size: Long)
 
-/** Checks GitHub Releases of the (private) repo and installs newer APKs. */
+/** Checks GitHub Releases of the public repo and installs newer APKs. */
 class Updater(private val context: Context, private val http: OkHttpClient) {
 
     val currentVersion: String = BuildConfig.VERSION_NAME
 
-    suspend fun latest(token: String): ReleaseInfo = withContext(Dispatchers.IO) {
+    suspend fun latest(): ReleaseInfo = withContext(Dispatchers.IO) {
         val req = Request.Builder()
             .url("https://api.github.com/repos/$REPO/releases/latest")
-            .headers(ghHeaders(token))
             .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
             .build()
         http.newCall(req).execute().use { resp ->
             when (resp.code) {
-                401 -> throw IOException("GitHub 토큰이 올바르지 않거나 만료되었습니다.")
-                403 -> throw IOException("토큰 권한이 부족합니다 (Contents: Read-only 필요).")
-                404 -> throw IOException("릴리즈가 없거나 토큰이 이 저장소에 접근할 수 없습니다.")
+                403, 429 -> throw IOException("GitHub 요청 한도 초과. 잠시 후 다시 시도하세요.")
+                404 -> throw IOException("릴리즈가 없습니다.")
             }
             if (!resp.isSuccessful) throw IOException("업데이트 확인 실패 (${resp.code})")
             val json = JSONObject(resp.body!!.string())
@@ -48,7 +47,7 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
                 tag = tag,
                 version = tag.removePrefix("v"),
                 notes = json.optString("body"),
-                assetUrl = apk.getString("url"),
+                assetUrl = apk.getString("browser_download_url"),
                 size = apk.optLong("size"),
             )
         }
@@ -56,13 +55,11 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
 
     fun isNewer(release: ReleaseInfo): Boolean = compare(release.version, currentVersion) > 0
 
-    suspend fun download(token: String, release: ReleaseInfo, onProgress: (Float) -> Unit): File =
+    suspend fun download(release: ReleaseInfo, onProgress: (Float) -> Unit): File =
         withContext(Dispatchers.IO) {
             val out = File(context.cacheDir, "update.apk")
             val req = Request.Builder()
                 .url(release.assetUrl)
-                .headers(ghHeaders(token))
-                .header("Accept", "application/octet-stream")
                 .build()
             http.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) throw IOException("다운로드 실패 (${resp.code})")
@@ -108,11 +105,6 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
             session.commit(pi.intentSender)
         }
     }
-
-    private fun ghHeaders(token: String) = okhttp3.Headers.Builder()
-        .add("Authorization", "Bearer $token")
-        .add("X-GitHub-Api-Version", "2022-11-28")
-        .build()
 
     companion object {
         const val REPO = "q09009/study-tablet"
