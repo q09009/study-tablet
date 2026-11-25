@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,6 +18,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Close
@@ -88,7 +91,13 @@ private fun HomeScreen(vm: AppViewModel, onOpenPdf: () -> Unit) {
             Modifier.fillMaxSize().padding(pad).padding(16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            AccountCard(vm, Modifier.width(400.dp))
+            Column(
+                Modifier.width(400.dp).fillMaxHeight().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                AccountCard(vm, Modifier.fillMaxWidth())
+                UpdateCard(vm, Modifier.fillMaxWidth())
+            }
             Column(Modifier.weight(1f)) {
                 Text("최근 문서", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))

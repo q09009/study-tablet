@@ -1,4 +1,17 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
+
+// Release signing: keystore.properties (local) or env vars (CI).
+val signingProps = Properties().apply {
+    rootProject.file("keystore.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+fun signingValue(key: String, env: String): String? = signingProps.getProperty(key) ?: System.getenv(env)
+
+// Version comes from -PappVersion=1.2.3 (set by the release workflow from the git tag).
+val appVersion = (findProperty("appVersion") as String?)?.removePrefix("v") ?: "0.1.0"
+val appVersionCode = appVersion.split(".").map { it.toIntOrNull() ?: 0 }.let { p ->
+    (p.getOrElse(0) { 0 } * 10000 + p.getOrElse(1) { 0 } * 100 + p.getOrElse(2) { 0 }).coerceAtLeast(1)
+}
 
 plugins {
     id("com.android.application")
@@ -14,13 +27,26 @@ android {
         applicationId = "com.q09009.studytablet"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersion
+    }
+
+    signingConfigs {
+        val storePath = signingValue("storeFile", "RELEASE_KEYSTORE_FILE")
+        if (storePath != null) {
+            create("release") {
+                storeFile = file(storePath)
+                storePassword = signingValue("storePassword", "RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = signingValue("keyAlias", "RELEASE_KEY_ALIAS") ?: "studytablet"
+                keyPassword = signingValue("keyPassword", "RELEASE_KEYSTORE_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
     compileOptions {
@@ -29,6 +55,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"

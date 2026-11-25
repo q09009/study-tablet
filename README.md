@@ -20,6 +20,15 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 요구사항: JDK 17+, Android SDK 36 (`local.properties`의 `sdk.dir`).
 
+## 릴리스 & 앱 내 업데이트
+
+- 릴리스: `git tag v0.2.0; git push origin v0.2.0` → GitHub Actions(`.github/workflows/release.yml`)가 서명된 APK를 빌드해 GitHub Release에 올립니다. 태그가 버전이 됩니다(`vX.Y.Z` → versionCode `X*10000+Y*100+Z`).
+- 앱 홈 화면 "앱 업데이트" 카드에 GitHub 토큰을 넣으면 실행 시 새 릴리스를 확인하고, 버튼 한 번으로 다운로드·설치합니다.
+  - 저장소가 비공개라 토큰이 필요합니다: Fine-grained token → Repository access: `study-tablet`만 → Permissions: **Contents: Read-only**.
+- 서명 키: `keystore.properties`(gitignore됨) + 키스토어 파일. CI는 `RELEASE_KEYSTORE_BASE64`, `RELEASE_KEYSTORE_PASSWORD` 시크릿을 씁니다. **키스토어를 잃어버리면 기존 설치본에 업데이트할 수 없으니 백업 필수.**
+- 디버그 빌드가 설치되어 있으면 서명이 달라 업데이트가 안 됩니다. 처음 한 번은 앱을 지우고 릴리스 APK를 설치하세요.
+- 로컬 릴리스 빌드: `.\gradlew.bat assembleRelease "-PappVersion=0.2.0"`
+
 ## 참고 / 주의
 
 - 로그인은 기기 안에서 `http://localhost:1455/auth/callback` 로컬 서버로 콜백을 받습니다(Codex CLI와 동일 포트). 로그인 완료 후 브라우저 페이지의 "앱으로 돌아가기"를 누르세요.

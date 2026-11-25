@@ -9,7 +9,10 @@ import com.q09009.studytablet.ai.CodexClient
 import com.q09009.studytablet.ai.PdfSummarizer
 import com.q09009.studytablet.auth.CodexAuth
 import com.q09009.studytablet.data.RecentDoc
+import com.q09009.studytablet.data.SecretStore
 import com.q09009.studytablet.data.Store
+import com.q09009.studytablet.update.ReleaseInfo
+import com.q09009.studytablet.update.Updater
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,8 +62,66 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val summary: StateFlow<SummaryState> = _summary
     private var summaryJob: Job? = null
 
+    val updater = Updater(app, http)
+    private val ghToken = SecretStore(app, "github_token")
+    val hasGhToken = ghToken.value
+    private val _update = MutableStateFlow(UpdateState())
+    val update: StateFlow<UpdateState> = _update
+    private var updateJob: Job? = null
+
     init {
         if (account.value != null) refreshUsage()
+        if (ghToken.value.value != null) checkUpdate(silent = true)
+    }
+
+    fun saveGhToken(raw: String) {
+        val token = raw.trim()
+        if (token.isEmpty()) return
+        ghToken.save(token)
+        checkUpdate()
+    }
+
+    fun removeGhToken() {
+        ghToken.clear()
+        _update.value = UpdateState()
+    }
+
+    fun checkUpdate(silent: Boolean = false) {
+        val token = ghToken.value.value ?: return
+        if (updateJob?.isActive == true) return
+        updateJob = viewModelScope.launch {
+            _update.value = UpdateState(checking = true)
+            _update.value = try {
+                val r = updater.latest(token)
+                UpdateState(release = r.takeIf(updater::isNewer), upToDate = !updater.isNewer(r))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                UpdateState(error = if (silent) null else e.message ?: e.toString())
+            }
+        }
+    }
+
+    /** Returns false when the user must first allow installs from this app. */
+    fun installUpdate(): Boolean {
+        val token = ghToken.value.value ?: return true
+        val release = _update.value.release ?: return true
+        if (!updater.canInstall()) return false
+        if (updateJob?.isActive == true) return true
+        updateJob = viewModelScope.launch {
+            _update.update { it.copy(progress = 0f, error = null) }
+            try {
+                val apk = updater.download(token, release) { p -> _update.update { it.copy(progress = p) } }
+                updater.install(apk)
+                _update.update { it.copy(progress = null) }
+            } catch (e: CancellationException) {
+                _update.update { it.copy(progress = null) }
+                throw e
+            } catch (e: Exception) {
+                _update.update { it.copy(progress = null, error = e.message ?: e.toString()) }
+            }
+        }
+        return true
     }
 
     fun login() {
@@ -203,6 +264,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (docName != null) append(" The student is currently viewing lecture material titled \"$docName\".")
     }
 }
+
+data class UpdateState(
+    val checking: Boolean = false,
+    val release: ReleaseInfo? = null,
+    val upToDate: Boolean = false,
+    val progress: Float? = null,
+    val error: String? = null,
+)
 
 data class ChatState(
     val messages: List<ChatMessage> = emptyList(),
