@@ -1,6 +1,9 @@
 package com.q09009.studytablet.ui
 
 import android.content.Intent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -17,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.FitScreen
@@ -31,6 +35,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -40,6 +45,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -55,6 +61,7 @@ import com.q09009.studytablet.record.RecorderService
 fun DocumentScreen(vm: AppViewModel, doc: OpenDoc, onBack: () -> Unit) {
     val zoom = remember(doc.uri) { PdfZoom() }
     val recording by RecorderService.state.collectAsState()
+    var chatOpen by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -71,12 +78,17 @@ fun DocumentScreen(vm: AppViewModel, doc: OpenDoc, onBack: () -> Unit) {
                     IconButton(onClick = zoom::zoomOut) { Icon(Icons.Default.ZoomOut, "축소") }
                     IconButton(onClick = zoom::zoomIn) { Icon(Icons.Default.ZoomIn, "확대") }
                     IconButton(onClick = zoom::reset) { Icon(Icons.Default.FitScreen, "100%") }
+                    IconButton(onClick = { chatOpen = !chatOpen }) {
+                        Icon(Icons.AutoMirrored.Filled.Chat, "AI에게 질문",
+                            tint = if (chatOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 },
             )
         },
     ) { pad ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(pad)) {
-            if (maxWidth >= 840.dp) {
+            val wide = maxWidth >= 840.dp
+            if (wide) {
                 Row(Modifier.fillMaxSize()) {
                     PdfViewer(doc.uri, zoom, Modifier.weight(0.6f).fillMaxHeight())
                     VerticalDivider()
@@ -84,6 +96,20 @@ fun DocumentScreen(vm: AppViewModel, doc: OpenDoc, onBack: () -> Unit) {
                 }
             } else {
                 CompactLayout(vm, doc, zoom)
+            }
+            AnimatedVisibility(
+                visible = chatOpen,
+                modifier = Modifier.align(Alignment.CenterEnd),
+                enter = slideInHorizontally { it },
+                exit = slideOutHorizontally { it },
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxHeight().then(if (wide) Modifier.width(460.dp) else Modifier.fillMaxWidth()),
+                    tonalElevation = 2.dp,
+                    shadowElevation = 12.dp,
+                ) {
+                    ChatPanel(vm, onClose = { chatOpen = false }, modifier = Modifier.fillMaxSize())
+                }
             }
         }
     }
@@ -126,7 +152,7 @@ private fun SidePanel(vm: AppViewModel, doc: OpenDoc, modifier: Modifier) {
 @Composable
 private fun SummaryPanel(vm: AppViewModel, doc: OpenDoc, modifier: Modifier) {
     val s by vm.summary.collectAsState()
-    val apiKey by vm.apiKey.collectAsState()
+    val account by vm.account.collectAsState()
     val context = LocalContext.current
 
     Column(modifier.padding(16.dp)) {
@@ -136,7 +162,7 @@ private fun SummaryPanel(vm: AppViewModel, doc: OpenDoc, modifier: Modifier) {
                 Text(s.status.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                 OutlinedButton(onClick = vm::cancelSummary) { Text("취소") }
             } else {
-                Button(onClick = vm::summarize, enabled = apiKey != null) {
+                Button(onClick = vm::summarize, enabled = account != null) {
                     Icon(Icons.Default.AutoAwesome, null)
                     Spacer(Modifier.width(8.dp))
                     Text(if (s.markdown == null) "AI 요약 만들기" else "다시 요약")
@@ -153,8 +179,8 @@ private fun SummaryPanel(vm: AppViewModel, doc: OpenDoc, modifier: Modifier) {
                 }
             }
         }
-        if (apiKey == null) {
-            Text("홈 화면에서 OpenAI API 키를 등록하면 요약을 만들 수 있습니다.",
+        if (account == null) {
+            Text("홈 화면에서 ChatGPT로 로그인하면 요약을 만들 수 있습니다.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp))
         }
