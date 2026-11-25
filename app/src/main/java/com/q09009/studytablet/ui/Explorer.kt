@@ -53,6 +53,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextRange
@@ -75,18 +79,20 @@ fun Explorer(vm: AppViewModel, onPickFolder: () -> Unit, onImport: () -> Unit, m
     var menuOpen by remember { mutableStateOf(false) }
 
     Column(modifier) {
-        Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 16.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
             Text(
-                root?.name?.uppercase() ?: "탐색기",
-                style = MaterialTheme.typography.labelLarge,
+                root?.name ?: "탐색기",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             if (root != null) {
-                IconButton(onClick = vm::newNote) { Icon(Icons.AutoMirrored.Filled.NoteAdd, "새 메모") }
-                IconButton(onClick = { newFolder = true }) { Icon(Icons.Default.CreateNewFolder, "새 폴더") }
+                IconButton(onClick = vm::newNote) { Icon(Icons.AutoMirrored.Filled.NoteAdd, "새 메모", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                IconButton(onClick = { newFolder = true }) { Icon(Icons.Default.CreateNewFolder, "새 폴더", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                 Box {
-                    IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "더보기") }
+                    IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "더보기", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(text = { Text("PDF 가져오기") },
                             leadingIcon = { Icon(Icons.Default.FileUpload, null) },
@@ -101,7 +107,7 @@ fun Explorer(vm: AppViewModel, onPickFolder: () -> Unit, onImport: () -> Unit, m
                 }
             }
         }
-        HorizontalDivider()
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         val r = root
         if (r == null) {
@@ -138,7 +144,7 @@ fun Explorer(vm: AppViewModel, onPickFolder: () -> Unit, onImport: () -> Unit, m
             Text("비어 있는 폴더입니다. 위의 버튼으로 메모를 만들거나 ⋮ 메뉴에서 PDF를 가져오세요.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(6.dp)) {
             items(rows, key = { it.node.uri.toString() }) { row ->
                 TreeRow(
                     vm, row,
@@ -163,7 +169,7 @@ private fun TreeRow(vm: AppViewModel, row: TreeItem, isExpanded: Boolean, highli
     var rename by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf(false) }
     val bg = when {
-        highlighted -> MaterialTheme.colorScheme.secondaryContainer
+        highlighted -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
         selected -> MaterialTheme.colorScheme.surfaceContainerHighest
         else -> Color.Transparent
     }
@@ -171,7 +177,8 @@ private fun TreeRow(vm: AppViewModel, row: TreeItem, isExpanded: Boolean, highli
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(40.dp)
+                .height(38.dp)
+                .clip(MaterialTheme.shapes.small)
                 .background(bg)
                 .combinedClickable(onClick = { vm.select(n) }, onLongClick = { menu = true })
                 .padding(start = (8 + row.depth * 16).dp, end = 8.dp),
@@ -186,7 +193,9 @@ private fun TreeRow(vm: AppViewModel, row: TreeItem, isExpanded: Boolean, highli
             val (icon, tint) = iconFor(n.kind)
             Icon(icon, null, Modifier.size(18.dp), tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(8.dp))
-            Text(n.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+            Text(n.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (highlighted) FontWeight.Medium else null,
+                color = if (highlighted) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface)
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             if (!n.isDir) {
@@ -219,9 +228,9 @@ private fun TreeRow(vm: AppViewModel, row: TreeItem, isExpanded: Boolean, highli
 @Composable
 private fun iconFor(kind: FileKind): Pair<ImageVector, Color?> = when (kind) {
     FileKind.DIR -> Icons.Default.Folder to MaterialTheme.colorScheme.primary
-    FileKind.PDF -> Icons.Default.PictureAsPdf to Color(0xFFD32F2F)
-    FileKind.TEXT -> Icons.Default.Description to Color(0xFF1976D2)
-    FileKind.AUDIO -> Icons.Default.AudioFile to Color(0xFF7B1FA2)
+    FileKind.PDF -> Icons.Default.PictureAsPdf to Color(0xFFE5534B)
+    FileKind.TEXT -> Icons.Default.Description to Color(0xFF3B82F6)
+    FileKind.AUDIO -> Icons.Default.AudioFile to Color(0xFF9B6BDF)
     FileKind.OTHER -> Icons.AutoMirrored.Filled.InsertDriveFile to null
 }
 

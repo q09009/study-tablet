@@ -34,6 +34,11 @@ sealed interface TabContent {
         override val key get() = "recorder"
         override val title get() = "녹음"
     }
+
+    data object Chat : TabContent {
+        override val key get() = "chat"
+        override val title get() = "AI 질문"
+    }
 }
 
 data class Pane(val tabs: List<TabContent> = emptyList(), val active: String? = null) {
@@ -129,6 +134,7 @@ data class EditorState(val panes: List<Pane> = listOf(Pane()), val focused: Int 
                 .put("parent", t.parent?.toString() ?: "")
             is TabContent.Audio -> JSONObject().put("t", "audio").put("uri", "${t.uri}").put("name", t.name)
             is TabContent.Recorder -> JSONObject().put("t", "rec")
+            is TabContent.Chat -> JSONObject().put("t", "chat")
             is TabContent.Summary -> null
         }
 
@@ -140,6 +146,7 @@ data class EditorState(val panes: List<Pane> = listOf(Pane()), val focused: Int 
                 "text" -> TabContent.Text(uri, o.optString("name"), parent)
                 "audio" -> TabContent.Audio(uri, o.optString("name"))
                 "rec" -> TabContent.Recorder
+                "chat" -> TabContent.Chat
                 else -> null
             }
         }

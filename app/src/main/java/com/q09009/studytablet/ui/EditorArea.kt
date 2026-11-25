@@ -1,6 +1,8 @@
 package com.q09009.studytablet.ui
 
 import android.content.Intent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -25,12 +27,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
@@ -47,6 +53,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -69,12 +76,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -84,7 +93,8 @@ fun EditorArea(vm: AppViewModel, singlePane: Boolean, modifier: Modifier = Modif
     val editor by vm.editor.collectAsState()
     // Zoom state per PDF tab, kept while the app runs so switching tabs keeps the zoom level.
     val zooms = remember { mutableMapOf<String, PdfZoom>() }
-    var split by rememberSaveable { mutableFloatStateOf(0.5f) }
+    var split by remember { mutableFloatStateOf(vm.store.split) }
+    var dragging by remember { mutableStateOf(false) }
 
     BoxWithConstraints(modifier) {
         val total = constraints.maxWidth.toFloat()
@@ -94,21 +104,30 @@ fun EditorArea(vm: AppViewModel, singlePane: Boolean, modifier: Modifier = Modif
         } else {
             Row(Modifier.fillMaxSize()) {
                 PaneView(vm, editor, 0, zooms, false, Modifier.weight(split).fillMaxHeight())
+                val handle by animateColorAsState(
+                    if (dragging) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                    label = "handle",
+                )
+                val handleWidth by animateDpAsState(if (dragging) 6.dp else 4.dp, label = "handleWidth")
                 Box(
                     Modifier
-                        .width(12.dp)
+                        .width(16.dp)
                         .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.surfaceContainer)
                         .pointerInput(total) {
-                            detectHorizontalDragGestures { change, dx ->
+                            detectHorizontalDragGestures(
+                                onDragStart = { dragging = true },
+                                onDragEnd = { dragging = false; vm.store.split = split },
+                                onDragCancel = { dragging = false; vm.store.split = split },
+                            ) { change, dx ->
                                 change.consume()
                                 split = (split + dx / total).coerceIn(0.2f, 0.8f)
                             }
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    VerticalDivider()
-                    Box(Modifier.size(4.dp, 40.dp).background(MaterialTheme.colorScheme.outlineVariant,
-                        androidx.compose.foundation.shape.RoundedCornerShape(2.dp)))
+                    if (dragging) VerticalDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+                    Box(Modifier.size(handleWidth, 48.dp).background(handle, CircleShape))
                 }
                 PaneView(vm, editor, 1, zooms, false, Modifier.weight(1f - split).fillMaxHeight())
             }
@@ -135,8 +154,7 @@ private fun PaneView(
             }
         },
     ) {
-        TabStrip(vm, editor, index, pane, focused, singlePane)
-        HorizontalDivider()
+        TabStrip(vm, editor, index, pane, focused && editor.panes.size > 1, singlePane)
         val tab = pane.activeTab
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (tab == null) {
@@ -149,6 +167,7 @@ private fun PaneView(
                         is TabContent.Summary -> SummaryTab(vm, tab, Modifier.fillMaxSize())
                         is TabContent.Audio -> AudioTab(tab.uri, tab.name, Modifier.fillMaxSize())
                         TabContent.Recorder -> RecorderTab(vm, Modifier.fillMaxSize())
+                        TabContent.Chat -> ChatPanel(vm, Modifier.fillMaxSize())
                     }
                 }
             }
@@ -160,16 +179,21 @@ private fun PaneView(
 private fun TabStrip(vm: AppViewModel, editor: EditorState, index: Int, pane: Pane, focused: Boolean, singlePane: Boolean) {
     val active = pane.activeTab?.key
     Row(
-        Modifier.fillMaxWidth().height(44.dp).background(MaterialTheme.colorScheme.surfaceContainer),
-        verticalAlignment = Alignment.CenterVertically,
+        Modifier.fillMaxWidth().height(46.dp).background(MaterialTheme.colorScheme.surfaceContainer)
+            .padding(start = 6.dp, top = 6.dp),
+        verticalAlignment = Alignment.Bottom,
     ) {
-        Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
             pane.tabs.forEach { t ->
                 TabChip(vm, index, t, selected = t.key == active, paneFocused = focused)
             }
         }
         if (singlePane && editor.panes.size > 1) {
-            IconButton(onClick = { vm.focusPane(1 - editor.focused.coerceIn(0, 1)) }) {
+            IconButton(onClick = { vm.focusPane(1 - editor.focused.coerceIn(0, 1)) }, Modifier.size(40.dp)) {
                 Text("${editor.focused + 1}/${editor.panes.size}", style = MaterialTheme.typography.labelMedium)
             }
         }
@@ -181,31 +205,38 @@ private fun TabStrip(vm: AppViewModel, editor: EditorState, index: Int, pane: Pa
 private fun TabChip(vm: AppViewModel, pane: Int, t: TabContent, selected: Boolean, paneFocused: Boolean) {
     var menu by remember { mutableStateOf(false) }
     val accent = MaterialTheme.colorScheme.primary
+    val shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)
     Box {
         Column(
             Modifier
-                .height(44.dp)
+                .height(40.dp)
                 .width(IntrinsicSize.Max)
+                .clip(shape)
                 .background(if (selected) MaterialTheme.colorScheme.surface else Color.Transparent)
                 .combinedClickable(onClick = { vm.activateTab(pane, t.key) }, onLongClick = { menu = true }),
         ) {
-            Box(Modifier.fillMaxWidth().height(2.dp).background(if (selected && paneFocused) accent else Color.Transparent))
             Row(
-                Modifier.weight(1f).padding(start = 12.dp),
+                Modifier.weight(1f).padding(start = 12.dp, end = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(tabIcon(t), null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(tabIcon(t), null, Modifier.size(16.dp),
+                    tint = if (selected) tabTint(t) else MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.width(6.dp))
                 Text(
                     t.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.widthIn(max = 220.dp),
                     color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                IconButton(onClick = { vm.closeTab(pane, t.key) }, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.Close, "닫기", Modifier.size(16.dp))
+                IconButton(onClick = { vm.closeTab(pane, t.key) }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Close, "닫기", Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+            Box(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp).height(2.dp)
+                    .background(if (selected && paneFocused) accent else Color.Transparent, CircleShape),
+            )
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(text = { Text("다른 쪽 창으로 이동") },
@@ -216,7 +247,6 @@ private fun TabChip(vm: AppViewModel, pane: Int, t: TabContent, selected: Boolea
                 onClick = { menu = false; vm.closeTab(pane, t.key) })
         }
     }
-    VerticalDivider(Modifier.height(44.dp))
 }
 
 private fun tabIcon(t: TabContent): ImageVector = when (t) {
@@ -225,15 +255,30 @@ private fun tabIcon(t: TabContent): ImageVector = when (t) {
     is TabContent.Summary -> Icons.Default.AutoAwesome
     is TabContent.Audio -> Icons.Default.AudioFile
     TabContent.Recorder -> Icons.Default.Mic
+    TabContent.Chat -> Icons.Default.Forum
+}
+
+@Composable
+fun tabTint(t: TabContent): Color = when (t) {
+    is TabContent.Pdf -> Color(0xFFE5534B)
+    is TabContent.Text -> Color(0xFF3B82F6)
+    is TabContent.Summary, TabContent.Chat -> MaterialTheme.colorScheme.primary
+    is TabContent.Audio, TabContent.Recorder -> Color(0xFF9B6BDF)
 }
 
 @Composable
 private fun EmptyPane(modifier: Modifier) {
-    Box(modifier, contentAlignment = Alignment.Center) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Icon(Icons.Default.AutoStories, null, Modifier.size(56.dp),
+            tint = MaterialTheme.colorScheme.outline)
+        Spacer(Modifier.height(16.dp))
+        Text("열린 파일이 없습니다", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(6.dp))
         Text(
-            "왼쪽 탐색기에서 파일을 눌러 여세요.\n길게 누르면 옆 창에 열 수 있습니다.",
+            "탐색기에서 파일을 눌러 여세요. 길게 누르면 옆 창에 열립니다.\nAI에게 물어보려면 왼쪽의 말풍선 아이콘을 누르세요.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
         )
     }
 }
@@ -241,11 +286,11 @@ private fun EmptyPane(modifier: Modifier) {
 @Composable
 private fun Toolbar(content: @Composable () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp),
+        Modifier.fillMaxWidth().height(48.dp).background(MaterialTheme.colorScheme.surface).padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) { content() }
-    HorizontalDivider()
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 @Composable
@@ -253,18 +298,27 @@ private fun PdfTab(vm: AppViewModel, pane: Int, tab: TabContent.Pdf, zoom: PdfZo
     val summaries by vm.summaries.collectAsState()
     val running = summaries[tab.uri]?.running == true
     var menu by remember { mutableStateOf(false) }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val narrow = maxWidth < 440.dp
     Column(Modifier.fillMaxSize()) {
         Toolbar {
             IconButton(onClick = zoom::zoomOut) { Icon(Icons.Default.ZoomOut, "축소") }
-            Text("${(zoom.value * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
+            if (!narrow) Text("${(zoom.value * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
             IconButton(onClick = zoom::zoomIn) { Icon(Icons.Default.ZoomIn, "확대") }
             IconButton(onClick = zoom::reset) { Icon(Icons.Default.FitScreen, "맞춤") }
             Spacer(Modifier.weight(1f))
-            FilledTonalButton(onClick = { vm.focusPane(pane); vm.summarize(tab) }) {
+            val summarizeIcon: @Composable () -> Unit = {
                 if (running) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("AI 요약")
+                else Icon(Icons.Default.AutoAwesome, "AI 요약", Modifier.size(18.dp))
+            }
+            if (narrow) {
+                FilledTonalIconButton(onClick = { vm.focusPane(pane); vm.summarize(tab) }) { summarizeIcon() }
+            } else {
+                FilledTonalButton(onClick = { vm.focusPane(pane); vm.summarize(tab) }) {
+                    summarizeIcon()
+                    Spacer(Modifier.width(8.dp))
+                    Text("AI 요약", maxLines = 1)
+                }
             }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "더보기") }
@@ -275,6 +329,7 @@ private fun PdfTab(vm: AppViewModel, pane: Int, tab: TabContent.Pdf, zoom: PdfZo
             }
         }
         PdfViewer(tab.uri, zoom, Modifier.weight(1f).fillMaxWidth())
+    }
     }
 }
 

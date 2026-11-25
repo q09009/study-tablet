@@ -389,6 +389,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun moveTab(pane: Int, key: String) = setEditor(_editor.value.moveToOther(pane, key))
 
+    /** Shows the AI chat as an editor tab, beside the current document when there is one. */
+    fun openChat() {
+        val s = _editor.value
+        val pane = s.panes.indexOfFirst { p -> p.tabs.any { it is TabContent.Chat } }
+        if (pane >= 0) setEditor(s.activate(pane, TabContent.Chat.key))
+        else openTab(TabContent.Chat, toSide = s.focusedTab != null)
+    }
+
+    fun closeChat() {
+        val s = _editor.value
+        val pane = s.panes.indexOfFirst { p -> p.tabs.any { it is TabContent.Chat } }
+        if (pane >= 0) closeTab(pane, TabContent.Chat.key)
+    }
+
     // ---- Summaries ----
 
     private fun summaryName(pdf: TabContent.Pdf) = "${pdf.name.substringBeforeLast('.')} 요약.md"
@@ -546,6 +560,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { codex.refreshUsage() }
     }
 
+    private val _theme = MutableStateFlow(
+        ThemeMode.entries.firstOrNull { it.name.equals(store.theme, true) } ?: ThemeMode.SYSTEM
+    )
+    val theme: StateFlow<ThemeMode> = _theme
+
+    fun setTheme(mode: ThemeMode) {
+        store.theme = mode.name.lowercase()
+        _theme.value = mode
+    }
+
     fun setModel(value: String) {
         store.model = value
         _model.value = store.model
@@ -579,10 +603,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (text.isEmpty() || _chat.value.running) return
         val history = _chat.value.messages + ChatMessage(ChatMessage.Role.USER, text)
         _chat.value = ChatState(messages = history, running = true)
-        val docName = when (val t = _editor.value.focusedTab) {
-            is TabContent.Pdf, is TabContent.Text, is TabContent.Summary -> t.title
-            else -> null
-        }
+        val ed = _editor.value
+        val docName = (listOfNotNull(ed.focusedTab) + ed.panes.mapNotNull { it.activeTab })
+            .firstOrNull { it is TabContent.Pdf || it is TabContent.Text || it is TabContent.Summary }?.title
         chatJob = viewModelScope.launch {
             val reply = StringBuilder()
             var lastUpdate = 0L

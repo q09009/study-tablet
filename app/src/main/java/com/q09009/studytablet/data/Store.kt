@@ -21,6 +21,14 @@ class Store(context: Context) {
         get() = prefs.getString("editor", null)
         set(v) = prefs.edit().putString("editor", v).apply()
 
+    var split: Float
+        get() = prefs.getFloat("split", 0.5f).coerceIn(0.2f, 0.8f)
+        set(v) = prefs.edit().putFloat("split", v).apply()
+
+    var theme: String
+        get() = prefs.getString("theme", "system") ?: "system"
+        set(v) = prefs.edit().putString("theme", v).apply()
+
     companion object {
         const val DEFAULT_MODEL = "gpt-5"
     }

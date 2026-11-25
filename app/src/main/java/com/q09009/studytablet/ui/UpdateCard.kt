@@ -34,9 +34,9 @@ fun UpdateCard(vm: AppViewModel, modifier: Modifier = Modifier) {
     val s by vm.update.collectAsState()
     val context = LocalContext.current
 
-    Card(modifier) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("앱 업데이트", style = MaterialTheme.typography.titleMedium)
+    SettingsCard(modifier) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("앱 업데이트", style = MaterialTheme.typography.titleSmall)
             Text("현재 버전 ${vm.updater.currentVersion}", style = MaterialTheme.typography.bodySmall)
 
             val release = s.release

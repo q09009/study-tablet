@@ -3,6 +3,7 @@ package com.q09009.studytablet.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -10,6 +11,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -27,15 +29,16 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -51,6 +54,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -71,7 +75,9 @@ fun AppRoot(vm: AppViewModel) {
     val recording by RecorderService.state.collectAsState()
     val message by vm.message.collectAsState()
     var side by rememberSaveable { mutableStateOf<SideView?>(SideView.EXPLORER) }
-    var chatOpen by rememberSaveable { mutableStateOf(false) }
+    val editor by vm.editor.collectAsState()
+    val chatOpen = editor.findPane(TabContent.Chat.key) >= 0
+    val recorderOpen = editor.findPane(TabContent.Recorder.key) >= 0
     val snackbar = remember { SnackbarHostState() }
 
     LaunchedEffect(message) {
@@ -99,16 +105,20 @@ fun AppRoot(vm: AppViewModel) {
 
             Row(Modifier.fillMaxSize()) {
                 Column(
-                    Modifier.width(56.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                    Modifier.width(64.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .padding(vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     ActivityIcon(Icons.Default.Folder, "탐색기", side == SideView.EXPLORER) {
                         side = if (side == SideView.EXPLORER) null else SideView.EXPLORER
                     }
-                    ActivityIcon(Icons.AutoMirrored.Filled.Chat, "AI에게 질문", chatOpen) { chatOpen = !chatOpen }
+                    ActivityIcon(Icons.Default.Forum, "AI에게 질문", chatOpen) {
+                        if (chatOpen) vm.closeChat() else vm.openChat()
+                    }
                     ActivityIcon(
                         if (recording != null) Icons.Default.FiberManualRecord else Icons.Default.Mic,
-                        "녹음", false,
+                        "녹음", recorderOpen,
                         tint = if (recording != null) MaterialTheme.colorScheme.error else null,
                     ) { vm.openTab(TabContent.Recorder) }
                     Spacer(Modifier.weight(1f))
@@ -116,14 +126,12 @@ fun AppRoot(vm: AppViewModel) {
                         badge = update.release != null) {
                         side = if (side == SideView.SETTINGS) null else SideView.SETTINGS
                     }
-                    Spacer(Modifier.size(8.dp))
                 }
-                VerticalDivider()
                 if (wide && side != null) {
                     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
                         sidePanel(Modifier.width(300.dp).fillMaxHeight())
                     }
-                    VerticalDivider()
+                    VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
                 EditorArea(vm, singlePane = !wide, modifier = Modifier.weight(1f).fillMaxHeight())
             }
@@ -132,13 +140,13 @@ fun AppRoot(vm: AppViewModel) {
             if (!wide) {
                 AnimatedVisibility(side != null, enter = fadeIn(), exit = fadeOut()) {
                     Box(
-                        Modifier.fillMaxSize().padding(start = 56.dp).background(Color.Black.copy(alpha = 0.3f))
+                        Modifier.fillMaxSize().padding(start = 64.dp).background(Color.Black.copy(alpha = 0.3f))
                             .clickable(remember { MutableInteractionSource() }, null) { side = null },
                     )
                 }
                 AnimatedVisibility(
                     side != null,
-                    modifier = Modifier.padding(start = 57.dp),
+                    modifier = Modifier.padding(start = 64.dp),
                     enter = slideInHorizontally { -it },
                     exit = slideOutHorizontally { -it },
                 ) {
@@ -148,22 +156,6 @@ fun AppRoot(vm: AppViewModel) {
                 }
             }
 
-            AnimatedVisibility(
-                visible = chatOpen,
-                modifier = Modifier.align(Alignment.CenterEnd),
-                enter = slideInHorizontally { it },
-                exit = slideOutHorizontally { it },
-            ) {
-                Surface(
-                    modifier = Modifier.fillMaxHeight().then(
-                        if (wide) Modifier.width(460.dp) else Modifier.fillMaxWidth().padding(start = 56.dp)
-                    ),
-                    tonalElevation = 2.dp,
-                    shadowElevation = 12.dp,
-                ) {
-                    ChatPanel(vm, onClose = { chatOpen = false }, modifier = Modifier.fillMaxSize())
-                }
-            }
 
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(16.dp))
         }
@@ -179,16 +171,14 @@ private fun ActivityIcon(
     badge: Boolean = false,
     onClick: () -> Unit,
 ) {
-    Box(Modifier.fillMaxWidth().size(56.dp), contentAlignment = Alignment.Center) {
-        if (active) {
-            Box(Modifier.align(Alignment.CenterStart).width(3.dp).size(3.dp, 32.dp)
-                .background(MaterialTheme.colorScheme.primary))
-        }
-        IconButton(onClick = onClick) {
-            BadgedBox(badge = { if (badge) Badge() }) {
-                Icon(icon, label, tint = tint ?: if (active) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+    val cs = MaterialTheme.colorScheme
+    val bg by animateColorAsState(if (active) cs.primaryContainer else Color.Transparent, label = "activityBg")
+    Box(
+        Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(bg).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        BadgedBox(badge = { if (badge) Badge() }) {
+            Icon(icon, label, tint = tint ?: if (active) cs.onPrimaryContainer else cs.onSurfaceVariant)
         }
     }
 }
