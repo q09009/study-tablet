@@ -22,6 +22,14 @@ data class ChatMessage(val role: Role, val text: String) {
     enum class Role { USER, ASSISTANT }
 }
 
+data class ModelOption(
+    val slug: String,
+    val displayName: String,
+    val description: String? = null,
+    val visible: Boolean = true,
+    val priority: Int = 99,
+)
+
 data class UsageWindow(val usedPercent: Double, val windowMinutes: Long?, val resetsInSeconds: Long?)
 
 data class CodexUsage(
@@ -132,6 +140,30 @@ class CodexClient(private val auth: CodexAuth, private val http: OkHttpClient) {
         }
     }
 
+    /** Models available to this ChatGPT plan (same list the Codex CLI `/model` picker shows). */
+    suspend fun models(): List<ModelOption> = withContext(Dispatchers.IO) {
+        val account = auth.freshAccount()
+        val req = Request.Builder()
+            .url("$BASE/codex/models?client_version=$CLIENT_VERSION")
+            .headers(authHeaders(account))
+            .get()
+            .build()
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("모델 목록을 가져오지 못했습니다 (${resp.code})")
+            val arr = JSONObject(resp.body!!.string()).optJSONArray("models") ?: JSONArray()
+            val all = (0 until arr.length()).map { arr.getJSONObject(it) }.map {
+                ModelOption(
+                    slug = it.getString("slug"),
+                    displayName = it.optString("display_name").ifEmpty { it.getString("slug") },
+                    description = it.optString("description").takeIf { d -> d.isNotEmpty() && d != "null" },
+                    visible = it.optString("visibility", "list") == "list",
+                    priority = it.optInt("priority", 99),
+                )
+            }
+            all.filter { it.visible }.ifEmpty { all }.sortedBy { it.priority }
+        }
+    }
+
     /** Fetches plan usage (same data the Codex CLI `/status` shows). Falls back silently. */
     suspend fun refreshUsage(): CodexUsage? = withContext(Dispatchers.IO) {
         val account = runCatching { auth.freshAccount() }.getOrNull() ?: return@withContext null
@@ -177,7 +209,7 @@ class CodexClient(private val auth: CodexAuth, private val http: OkHttpClient) {
         val b = Headers.Builder()
             .add("Authorization", "Bearer ${account.accessToken}")
             .add("originator", CodexAuth.ORIGINATOR)
-            .add("User-Agent", "codex_cli_rs/0.50.0 (Android) StudyTablet")
+            .add("User-Agent", "codex_cli_rs/$CLIENT_VERSION (Android) StudyTablet")
         account.accountId?.let { b.add("chatgpt-account-id", it) }
         return b.build()
     }
@@ -186,5 +218,6 @@ class CodexClient(private val auth: CodexAuth, private val http: OkHttpClient) {
 
     companion object {
         const val BASE = "https://chatgpt.com/backend-api"
+        const val CLIENT_VERSION = "0.172.0"
     }
 }

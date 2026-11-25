@@ -3,7 +3,6 @@ package com.q09009.studytablet
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,7 +20,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) handleIntent(intent)
         setContent {
             StudyTheme {
-                AppRoot(vm, onPdfPicked = ::openPicked)
+                AppRoot(vm)
             }
         }
     }
@@ -41,13 +40,6 @@ class MainActivity : ComponentActivity() {
         runCatching {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        vm.openDoc(uri, displayName(uri))
-    }
-
-    private fun displayName(uri: Uri): String {
-        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            if (c.moveToFirst()) c.getString(0)?.let { return it }
-        }
-        return uri.lastPathSegment ?: "document.pdf"
+        vm.openExternalPdf(uri)
     }
 }

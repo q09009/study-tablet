@@ -42,7 +42,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.q09009.studytablet.ai.ChatMessage
 
-/** Simple free-form Q&A with the model. Shown on demand from the document screen. */
+/** Simple free-form Q&A with the model. Shown on demand from the activity bar. */
 @Composable
 fun ChatPanel(vm: AppViewModel, onClose: () -> Unit, modifier: Modifier = Modifier) {
     val chat by vm.chat.collectAsState()
@@ -57,7 +57,8 @@ fun ChatPanel(vm: AppViewModel, onClose: () -> Unit, modifier: Modifier = Modifi
 
     Column(modifier.imePadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("AI에게 질문", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Text("AI에게 질문", style = MaterialTheme.typography.titleMedium)
+            ModelPicker(vm, Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 6.dp), compact = true)
             IconButton(onClick = vm::clearChat, enabled = chat.messages.isNotEmpty() || chat.running) {
                 Icon(Icons.Default.DeleteSweep, "대화 지우기")
             }
@@ -74,7 +75,7 @@ fun ChatPanel(vm: AppViewModel, onClose: () -> Unit, modifier: Modifier = Modifi
             if (chat.messages.isEmpty() && !chat.running) {
                 item {
                     Text(
-                        if (account == null) "홈 화면에서 ChatGPT로 로그인하면 질문할 수 있습니다."
+                        if (account == null) "왼쪽 아래 설정에서 ChatGPT로 로그인하면 질문할 수 있습니다."
                         else "모르는 개념을 바로 물어보세요.\n예: \"라운드 로빈 스케줄링이 뭐야?\"",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

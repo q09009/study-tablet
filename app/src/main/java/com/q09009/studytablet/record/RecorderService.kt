@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.MediaRecorder
+import android.net.Uri
 import android.os.IBinder
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
@@ -14,12 +15,15 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.q09009.studytablet.MainActivity
 import com.q09009.studytablet.StudyApp
+import com.q09009.studytablet.data.Workspace
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
 data class RecordingState(
     val file: File,
+    val dir: Uri,
+    val name: String,
     val startedAtElapsed: Long,
     val pausedAtElapsed: Long? = null,
     val pausedTotalMs: Long = 0,
@@ -37,15 +41,20 @@ class RecorderService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> start(File(intent.getStringExtra(EXTRA_PATH)!!), intent.getStringExtra(EXTRA_TITLE).orEmpty())
+            ACTION_START -> start(
+                Uri.parse(intent.getStringExtra(EXTRA_DIR)!!),
+                intent.getStringExtra(EXTRA_NAME)!!,
+                intent.getStringExtra(EXTRA_TITLE).orEmpty(),
+            )
             ACTION_PAUSE -> pauseOrResume()
             ACTION_STOP -> stopRecording()
         }
         return START_NOT_STICKY
     }
 
-    private fun start(file: File, title: String) {
+    private fun start(dir: Uri, name: String, title: String) {
         if (recorder != null) return
+        val file = File(cacheDir, "recording-${System.currentTimeMillis()}.m4a")
         ServiceCompat.startForeground(
             this, NOTIFICATION_ID, notification(title),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
@@ -70,7 +79,7 @@ class RecorderService : Service() {
             return
         }
         recorder = r
-        _state.value = RecordingState(file, SystemClock.elapsedRealtime())
+        _state.value = RecordingState(file, dir, name, SystemClock.elapsedRealtime())
     }
 
     private fun pauseOrResume() {
@@ -87,15 +96,34 @@ class RecorderService : Service() {
     }
 
     private fun stopRecording() {
+        val s = _state.value
+        var ok = false
         recorder?.let { r ->
-            runCatching { r.stop() }.onFailure { _state.value?.file?.delete() }
+            ok = runCatching { r.stop() }.isSuccess
             r.release()
         }
         recorder = null
         _state.value = null
-        _savedCount.value++
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        if (s == null || !ok) {
+            s?.file?.delete()
+            stopSelf()
+            return
+        }
+        // Copy the finished recording into the workspace folder off the main thread.
+        Thread {
+            try {
+                Workspace(this).importFileBlocking(s.dir, s.file, s.name, "audio/mp4")
+                s.file.delete()
+            } catch (e: Exception) {
+                val backup = File(getExternalFilesDir(null), s.name)
+                runCatching { s.file.copyTo(backup, overwrite = true); s.file.delete() }
+                _error.value = "폴더에 저장하지 못해 앱 폴더에 보관했습니다: ${backup.absolutePath}"
+            }
+            _saved.value = s.dir
+            _savedCount.value++
+            stopSelf()
+        }.start()
     }
 
     override fun onDestroy() {
@@ -126,7 +154,8 @@ class RecorderService : Service() {
         private const val ACTION_START = "start"
         private const val ACTION_PAUSE = "pause"
         private const val ACTION_STOP = "stop"
-        private const val EXTRA_PATH = "path"
+        private const val EXTRA_DIR = "dir"
+        private const val EXTRA_NAME = "name"
         private const val EXTRA_TITLE = "title"
         private const val NOTIFICATION_ID = 42
 
@@ -140,13 +169,17 @@ class RecorderService : Service() {
         private val _savedCount = MutableStateFlow(0)
         val savedCount: StateFlow<Int> = _savedCount
 
+        private val _saved = MutableStateFlow<Uri?>(null)
+        /** Folder that received the most recently saved recording. */
+        val saved: StateFlow<Uri?> = _saved
+
         fun clearError() { _error.value = null }
 
-        fun start(context: Context, file: File, title: String) {
+        fun start(context: Context, dir: Uri, name: String, title: String) {
             ContextCompat.startForegroundService(
                 context,
                 Intent(context, RecorderService::class.java).setAction(ACTION_START)
-                    .putExtra(EXTRA_PATH, file.absolutePath).putExtra(EXTRA_TITLE, title),
+                    .putExtra(EXTRA_DIR, dir.toString()).putExtra(EXTRA_NAME, name).putExtra(EXTRA_TITLE, title),
             )
         }
 
