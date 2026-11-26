@@ -65,10 +65,50 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import com.q09009.studytablet.data.FileKind
 import com.q09009.studytablet.data.FsNode
 
 private data class TreeItem(val node: FsNode, val depth: Int)
+
+/** Shared drag-and-drop state for the file tree; positions are in window coordinates. */
+private class TreeDrag(val root: FsNode) {
+    var node by mutableStateOf<FsNode?>(null)
+    var pos by mutableStateOf(Offset.Zero)
+    var box: LayoutCoordinates? = null
+    val rows = mutableStateMapOf<Uri, Pair<Rect, FsNode>>()
+
+    /** Folder under the pointer: a hovered folder, a hovered file's folder, or the root elsewhere. */
+    fun target(): FsNode? {
+        if (node == null) return null
+        val b = box?.takeIf { it.isAttached }?.boundsInWindow()
+        if (b != null && !b.contains(pos)) return null
+        val hit = rows.values.firstOrNull { it.first.contains(pos) }?.second ?: return root
+        if (hit.isDir) return hit
+        val parent = hit.parent ?: return root
+        return rows[parent]?.second ?: if (parent == root.uri) root else null
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -167,14 +207,44 @@ fun Explorer(vm: AppViewModel, onPickFolder: () -> Unit, onImport: () -> Unit, m
             Text("비어 있는 폴더입니다. 위의 버튼으로 메모를 만들거나 ⋮ 메뉴에서 PDF를 가져오세요.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(6.dp)) {
-            items(rows, key = { it.node.uri.toString() }) { row ->
-                TreeRow(
-                    vm, row,
-                    isExpanded = row.node.uri in expanded,
-                    highlighted = row.node.uri == activeUri,
-                    selected = row.node.uri == selected?.uri,
-                )
+        val drag = remember(r.uri) { TreeDrag(r) }
+        val dragTarget = drag.target()
+        val canDrop = drag.node?.let { n -> dragTarget?.let { vm.canMove(n, it.uri) } } == true
+        Box(Modifier.weight(1f).fillMaxWidth().onGloballyPositioned { drag.box = it }) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(6.dp)) {
+                items(rows, key = { it.node.uri.toString() }) { row ->
+                    TreeRow(
+                        vm, row, drag,
+                        isExpanded = row.node.uri in expanded,
+                        highlighted = row.node.uri == activeUri,
+                        selected = row.node.uri == selected?.uri,
+                        dropTarget = canDrop && row.node.uri == dragTarget?.uri,
+                        onDrop = { n -> drag.target()?.let { t -> if (vm.canMove(n, t.uri)) vm.moveTo(n, t.uri) } },
+                    )
+                }
+            }
+            val dn = drag.node
+            val box = drag.box
+            if (dn != null && box != null && box.isAttached) {
+                val p = box.windowToLocal(drag.pos)
+                Row(
+                    Modifier
+                        .offset { IntOffset(p.x.roundToInt() + 16, p.y.roundToInt() - 56) }
+                        .shadow(6.dp, MaterialTheme.shapes.medium)
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(if (canDrop) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val (icon, tint) = iconFor(dn.kind)
+                    Icon(icon, null, Modifier.size(18.dp), tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (canDrop) "${dn.name} ? ${dragTarget?.name}" else dn.name,
+                        style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 320.dp),
+                    )
+                }
             }
         }
     }
@@ -187,13 +257,22 @@ fun Explorer(vm: AppViewModel, onPickFolder: () -> Unit, onImport: () -> Unit, m
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TreeRow(vm: AppViewModel, row: TreeItem, isExpanded: Boolean, highlighted: Boolean, selected: Boolean) {
+private fun TreeRow(
+    vm: AppViewModel, row: TreeItem, drag: TreeDrag,
+    isExpanded: Boolean, highlighted: Boolean, selected: Boolean, dropTarget: Boolean,
+    onDrop: (FsNode) -> Unit,
+) {
     val n = row.node
+    val haptic = LocalHapticFeedback.current
+    var coords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    DisposableEffect(n.uri) { onDispose { drag.rows.remove(n.uri) } }
     var menu by remember { mutableStateOf(false) }
     var rename by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf(false) }
     var move by remember { mutableStateOf(false) }
     val bg = when {
+        dropTarget -> MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+        drag.node?.uri == n.uri -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
         highlighted -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
         selected -> MaterialTheme.colorScheme.surfaceContainerHighest
         else -> Color.Transparent
@@ -205,7 +284,33 @@ private fun TreeRow(vm: AppViewModel, row: TreeItem, isExpanded: Boolean, highli
                 .height(38.dp)
                 .clip(MaterialTheme.shapes.small)
                 .background(bg)
-                .combinedClickable(onClick = { vm.select(n) }, onLongClick = { menu = true })
+                .onGloballyPositioned { c -> coords = c; drag.rows[n.uri] = c.boundsInWindow() to n }
+                .pointerInput(n.uri) {
+                    val slop = viewConfiguration.touchSlop
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val long = awaitLongPressOrCancellation(down.id)
+                        if (long == null) {
+                            val up = currentEvent.changes.firstOrNull { it.id == down.id }
+                            if (up != null && up.changedToUp() && !up.isConsumed) { up.consume(); vm.select(n) }
+                            return@awaitEachGesture
+                        }
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        val c = coords
+                        val toWindow = { o: Offset -> c?.takeIf { it.isAttached }?.localToWindow(o) ?: o }
+                        var moved = 0f
+                        val ended = drag(long.id) { ch ->
+                            moved += ch.positionChange().getDistance()
+                            if (moved > slop && drag.node == null) drag.node = n
+                            drag.pos = toWindow(ch.position)
+                            ch.consume()
+                        }
+                        val dragged = drag.node != null
+                        if (ended && dragged) onDrop(n)
+                        drag.node = null
+                        if (!dragged) menu = true
+                    }
+                }
                 .padding(start = (8 + row.depth * 16).dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
