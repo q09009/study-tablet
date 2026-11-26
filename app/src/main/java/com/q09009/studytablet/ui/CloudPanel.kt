@@ -144,7 +144,8 @@ private fun LoginForm(vm: AppViewModel, s: CloudState) {
             color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         OutlinedTextField(
             value = server, onValueChange = { server = it },
-            label = { Text("서버 주소") }, placeholder = { Text("cloud.example.com") },
+            label = { Text("서버 주소") }, placeholder = { Text("cloud.example.com 또는 http://192.168.0.10:8080") },
+            supportingText = { Text("http:// 없이 쓰면 HTTPS로 먼저 시도하고, 안 되면 HTTP로 다시 시도합니다.") },
             singleLine = true, enabled = !s.loginBusy,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             modifier = Modifier.fillMaxWidth(),

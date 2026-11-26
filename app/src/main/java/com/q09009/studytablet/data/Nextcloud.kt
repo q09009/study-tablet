@@ -20,6 +20,8 @@ import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import java.io.IOException
 import java.io.OutputStream
+import javax.net.ssl.SSLException
+import javax.net.ssl.SSLHandshakeException
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -51,16 +53,18 @@ class Nextcloud(context: Context, private val http: OkHttpClient) {
 
     /** Opens the browser for the user to approve access, then polls until Nextcloud hands out an app password. */
     suspend fun login(serverInput: String): NcAccount = withContext(Dispatchers.IO) {
-        val server = normalize(serverInput)
-        lastServer = server
-        val start = http.newCall(
-            Request.Builder().url("$server/index.php/login/v2")
-                .header("User-Agent", USER_AGENT)
-                .post(ByteArray(0).toRequestBody()).build()
-        ).execute().use { r ->
-            if (!r.isSuccessful) throw IOException("Nextcloud 서버에 연결할 수 없습니다 (HTTP ${r.code}). 주소를 확인하세요.")
-            JSONObject(r.body!!.string())
+        val typed = serverInput.trim()
+        val explicit = typed.startsWith("http://", true) || typed.startsWith("https://", true)
+        var server = normalize(serverInput)
+        val start = try {
+            startLogin(server)
+        } catch (e: SSLException) {
+            // No scheme typed: home servers often serve plain HTTP on a custom port, so retry without TLS.
+            if (explicit) throw tlsError(server, e)
+            server = "http://" + server.removePrefix("https://")
+            try { startLogin(server) } catch (e2: IOException) { throw tlsError("https://" + server.removePrefix("http://"), e) }
         }
+        lastServer = server
         val poll = start.getJSONObject("poll")
         appContext.startActivity(
             Intent(Intent.ACTION_VIEW, Uri.parse(start.getString("login"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -77,7 +81,9 @@ class Nextcloud(context: Context, private val http: OkHttpClient) {
             done
         }
 
-        val base = normalize(result.getString("server"))
+        // Prefer the address that actually worked; Nextcloud may report a different scheme behind a proxy.
+        val reported = normalize(result.getString("server"))
+        val base = if (Uri.parse(reported).host == Uri.parse(server).host) server else reported
         val login = result.getString("loginName")
         val password = result.getString("appPassword")
         val userId = fetchUserId(base, login, password) ?: login
@@ -87,6 +93,22 @@ class Nextcloud(context: Context, private val http: OkHttpClient) {
         _account.value = acc
         acc
     }
+
+    private fun startLogin(server: String): JSONObject = http.newCall(
+        Request.Builder().url("$server/index.php/login/v2")
+            .header("User-Agent", USER_AGENT)
+            .post(ByteArray(0).toRequestBody()).build()
+    ).execute().use { r ->
+        if (r.code == 400) throw IOException("Nextcloud가 이 주소를 신뢰하지 않습니다 (HTTP 400). 서버 config.php의 trusted_domains에 이 주소를 추가하세요.")
+        if (!r.isSuccessful) throw IOException("Nextcloud 서버에 연결할 수 없습니다 (HTTP ${r.code}). 주소를 확인하세요.")
+        val body = r.body!!.string()
+        runCatching { JSONObject(body) }.getOrElse { throw IOException("Nextcloud 응답이 아닙니다. 주소와 포트를 확인하세요.") }
+    }
+
+    private fun tlsError(server: String, e: SSLException): IOException = IOException(
+        if (e is SSLHandshakeException) "HTTPS 인증서를 신뢰할 수 없습니다 ($server). 자체 서명 인증서라면 http:// 주소를 쓰거나 정식 인증서를 설정하세요."
+        else "HTTPS로 연결할 수 없습니다 ($server). 서버가 HTTP만 쓴다면 주소 앞에 http://를 붙이세요."
+    )
 
     private fun fetchUserId(server: String, login: String, password: String): String? = runCatching {
         http.newCall(
