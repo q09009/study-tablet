@@ -67,7 +67,7 @@ class Nextcloud(context: Context, private val http: OkHttpClient) {
         lastServer = server
         val poll = start.getJSONObject("poll")
         appContext.startActivity(
-            Intent(Intent.ACTION_VIEW, Uri.parse(start.getString("login"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            Intent(Intent.ACTION_VIEW, Uri.parse(onServer(start.getString("login"), server))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
 
         val result = withTimeout(20 * 60 * 1000L) {
@@ -75,15 +75,14 @@ class Nextcloud(context: Context, private val http: OkHttpClient) {
             while (done == null) {
                 delay(2000)
                 val body = FormBody.Builder().add("token", poll.getString("token")).build()
-                done = http.newCall(Request.Builder().url(poll.getString("endpoint")).post(body).build())
+                done = http.newCall(Request.Builder().url(onServer(poll.getString("endpoint"), server)).post(body).build())
                     .execute().use { r -> if (r.code == 200) JSONObject(r.body!!.string()) else null }
             }
             done
         }
 
-        // Prefer the address that actually worked; Nextcloud may report a different scheme behind a proxy.
-        val reported = normalize(result.getString("server"))
-        val base = if (Uri.parse(reported).host == Uri.parse(server).host) server else reported
+        // Keep the address that actually worked: Nextcloud may report an internal/proxy host (e.g. behind Tailscale MagicDNS).
+        val base = server
         val login = result.getString("loginName")
         val password = result.getString("appPassword")
         val userId = fetchUserId(base, login, password) ?: login
@@ -92,6 +91,12 @@ class Nextcloud(context: Context, private val http: OkHttpClient) {
             .putString("password", password).putString("user", userId).apply()
         _account.value = acc
         acc
+    }
+
+    /** Points a server-issued Login Flow URL at the address the user reached, since the reported host may not resolve here. */
+    private fun onServer(url: String, server: String): String {
+        val i = url.indexOf("/login/v2")
+        return if (i < 0) url else "$server/index.php" + url.substring(i)
     }
 
     private fun startLogin(server: String): JSONObject = http.newCall(
