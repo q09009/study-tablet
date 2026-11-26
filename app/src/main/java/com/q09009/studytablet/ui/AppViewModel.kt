@@ -389,12 +389,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun moveTab(pane: Int, key: String) = setEditor(_editor.value.moveToOther(pane, key))
 
-    /** Shows the AI chat as an editor tab, beside the current document when there is one. */
-    fun openChat() {
+    fun openChat() = openTool(TabContent.Chat)
+
+    fun openRecorder() = openTool(TabContent.Recorder)
+
+    /** Shows a tool tab (chat, recorder) beside the current tab when there is one, or focuses it if already open. */
+    private fun openTool(content: TabContent) {
         val s = _editor.value
-        val pane = s.panes.indexOfFirst { p -> p.tabs.any { it is TabContent.Chat } }
-        if (pane >= 0) setEditor(s.activate(pane, TabContent.Chat.key))
-        else openTab(TabContent.Chat, toSide = s.focusedTab != null)
+        val pane = s.findPane(content.key)
+        if (pane >= 0) setEditor(s.activate(pane, content.key))
+        else openTab(content, toSide = s.focusedTab != null)
     }
 
     fun closeChat() {

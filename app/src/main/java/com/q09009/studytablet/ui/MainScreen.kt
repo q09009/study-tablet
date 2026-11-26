@@ -120,7 +120,7 @@ fun AppRoot(vm: AppViewModel) {
                         if (recording != null) Icons.Default.FiberManualRecord else Icons.Default.Mic,
                         "녹음", recorderOpen,
                         tint = if (recording != null) MaterialTheme.colorScheme.error else null,
-                    ) { vm.openTab(TabContent.Recorder) }
+                    ) { vm.openRecorder() }
                     Spacer(Modifier.weight(1f))
                     ActivityIcon(Icons.Default.Settings, "설정", side == SideView.SETTINGS,
                         badge = update.release != null) {
