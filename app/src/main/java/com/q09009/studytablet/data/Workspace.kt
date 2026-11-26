@@ -130,6 +130,8 @@ class Workspace(context: Context) {
         dst
     }
 
+    fun openInput(uri: Uri) = cr.openInputStream(uri) ?: throw IOException("파일을 읽을 수 없습니다.")
+
     fun openOutput(uri: Uri) = cr.openOutputStream(uri, "w") ?: throw IOException("파일에 쓸 수 없습니다.")
 
     /** Copies a content uri (e.g. a picked PDF) into [dir]. */

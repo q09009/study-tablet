@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
@@ -128,10 +129,25 @@ fun CloudPanel(vm: AppViewModel, modifier: Modifier = Modifier) {
             selected!!.parent == root?.uri || selected!!.parent == null -> root?.name
             else -> children.values.flatten().firstOrNull { it.uri == selected!!.parent }?.name
         }
+        if (s.uploading.isNotEmpty()) {
+            val known = s.uploading.values.filter { it >= 0f }
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.CloudUpload, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text("올리는 중…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+            }
+            if (known.isEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
+            else LinearProgressIndicator({ known.min() }, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
+        }
         Text(
             if (targetName == null) "탐색기에서 작업 폴더를 먼저 선택하세요." else "받을 위치: $targetName  ·  탐색기에서 폴더를 선택해 바꿀 수 있어요",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp),
+        )
+        Text(
+            "올릴 위치: 지금 열린 Nextcloud 폴더  ·  탐색기에서 파일을 길게 눌러 'Nextcloud에 올리기'",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 10.dp),
         )
     }
 }
@@ -140,7 +156,7 @@ fun CloudPanel(vm: AppViewModel, modifier: Modifier = Modifier) {
 private fun LoginForm(vm: AppViewModel, s: CloudState) {
     var server by rememberSaveable { mutableStateOf(vm.nextcloud.lastServer) }
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Nextcloud에 연결하면 서버의 자료를 태블릿 작업 폴더로 바로 받을 수 있어요. 브라우저에서 로그인하고 접근을 허용하면 됩니다.",
+        Text("Nextcloud에 연결하면 서버의 자료를 태블릿 작업 폴더로 받거나, 태블릿 파일을 서버로 올릴 수 있어요. 브라우저에서 로그인하고 접근을 허용하면 됩니다.",
             color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         OutlinedTextField(
             value = server, onValueChange = { server = it },

@@ -571,6 +571,78 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Uploads a local file (or a whole folder) into the Nextcloud folder open in the cloud panel. */
+    fun uploadToCloud(node: FsNode) {
+        if (nextcloud.account.value == null) {
+            _message.value = "먼저 Nextcloud에 로그인하세요."
+            return
+        }
+        val target = _cloud.value.path
+        if (node.uri.toString() in _cloud.value.uploading) return
+        viewModelScope.launch {
+            try {
+                val existing = nextcloud.list(target)
+                if (node.isDir) {
+                    val n = uploadDir(node, target, existing)
+                    _message.value = "'${node.name}' 올리기 완료 (파일 ${n}개)"
+                } else {
+                    val skipped = !uploadFile(node, target, existing)
+                    _message.value = if (skipped) "Nextcloud에 이미 같은 파일이 있습니다: ${node.name}" else "'${node.name}'을(를) Nextcloud에 올렸습니다."
+                }
+            } catch (e: Exception) {
+                fail(e)
+            }
+            if (_cloud.value.path == target) openCloud(target)
+        }
+    }
+
+    /** Returns false when an identical file (same name and size) is already there. */
+    private suspend fun uploadFile(node: FsNode, dir: String, existing: List<CloudEntry>): Boolean {
+        if (existing.any { !it.isDir && it.name == node.name && it.size == node.size }) return false
+        val names = existing.map { it.name }.toSet()
+        var name = node.name
+        if (name in names) {
+            val base = node.name.substringBeforeLast('.')
+            val ext = node.name.substringAfterLast('.', "").let { if (it.isEmpty() || base.isEmpty()) "" else ".$it" }
+            val stem = if (ext.isEmpty()) node.name else base
+            var i = 1
+            while ("$stem ($i)$ext" in names) i++
+            name = "$stem ($i)$ext"
+        }
+        val key = node.uri.toString()
+        _cloud.update { it.copy(uploading = it.uploading + (key to 0f)) }
+        try {
+            var last = -1
+            nextcloud.upload(dir.trimEnd('/') + "/" + name, node.size, node.mime, { ws.openInput(node.uri) }) { p ->
+                val pct = ((p ?: 0f) * 100).toInt()
+                if (pct != last) {
+                    last = pct
+                    _cloud.update { s -> s.copy(uploading = s.uploading + (key to (p ?: -1f))) }
+                }
+            }
+        } finally {
+            _cloud.update { it.copy(uploading = it.uploading - key) }
+        }
+        return true
+    }
+
+    private suspend fun uploadDir(node: FsNode, parent: String, existing: List<CloudEntry>): Int {
+        val remote = parent.trimEnd('/') + "/" + node.name
+        val key = node.uri.toString()
+        _cloud.update { it.copy(uploading = it.uploading + (key to -1f)) }
+        try {
+            val there = if (existing.any { it.isDir && it.name == node.name }) nextcloud.list(remote)
+                else { nextcloud.mkdir(remote); emptyList() }
+            var count = 0
+            ws.list(node.uri).forEach { child ->
+                count += if (child.isDir) uploadDir(child, remote, there) else { uploadFile(child, remote, there); 1 }
+            }
+            return count
+        } finally {
+            _cloud.update { it.copy(uploading = it.uploading - key) }
+        }
+    }
+
     // ---- AI organize ----
 
     private val _organize = MutableStateFlow(OrganizeState())
@@ -926,6 +998,8 @@ data class CloudState(
     val loginBusy: Boolean = false,
     /** Remote path -> progress (0..1, or -1 when unknown). */
     val downloading: Map<String, Float> = emptyMap(),
+    /** Local uri -> upload progress (0..1, or -1 when unknown). */
+    val uploading: Map<String, Float> = emptyMap(),
 )
 
 data class OrganizeItem(val file: FsNode, val subject: String, val checked: Boolean = true)

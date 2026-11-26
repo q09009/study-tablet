@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
@@ -464,6 +465,8 @@ private fun TreeRow(
     var coords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     DisposableEffect(n.uri) { onDispose { drag.rows.remove(n.uri) } }
     var menu by remember { mutableStateOf(false) }
+    val cloudReady = vm.ncAccount.collectAsState().value != null
+    val uploading = vm.cloud.collectAsState().value.uploading[n.uri.toString()]
     var rename by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf(false) }
     var move by remember { mutableStateOf(false) }
@@ -571,6 +574,12 @@ private fun TreeRow(
             DropdownMenuItem(text = { Text("이동…") },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, null) },
                 onClick = { menu = false; move = true })
+            if (cloudReady) {
+                DropdownMenuItem(text = { Text("Nextcloud에 올리기") },
+                    leadingIcon = { Icon(Icons.Default.CloudUpload, null) },
+                    enabled = uploading == null,
+                    onClick = { menu = false; vm.uploadToCloud(n) })
+            }
             DropdownMenuItem(text = { Text("삭제") },
                 leadingIcon = { Icon(Icons.Default.Delete, null) },
                 onClick = { menu = false; delete = true })

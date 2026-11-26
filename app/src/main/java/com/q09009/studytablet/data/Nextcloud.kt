@@ -11,14 +11,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import okhttp3.Credentials
+import okhttp3.MediaType
 import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
 import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import java.io.IOException
+import java.io.InputStream
 import java.io.OutputStream
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLHandshakeException
@@ -29,7 +33,7 @@ data class NcAccount(val server: String, val loginName: String, val appPassword:
 
 data class CloudEntry(val path: String, val name: String, val isDir: Boolean, val size: Long, val modified: Long)
 
-/** Read-only Nextcloud access: Login Flow v2 for an app password, WebDAV for listing and downloading. */
+/** Nextcloud access: Login Flow v2 for an app password, WebDAV for listing, downloading and uploading. */
 class Nextcloud(context: Context, private val http: OkHttpClient) {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences("nextcloud", Context.MODE_PRIVATE)
@@ -179,6 +183,47 @@ class Nextcloud(context: Context, private val http: OkHttpClient) {
                 }
             }
     }
+
+    /** Creates a remote folder; an already existing folder is fine. */
+    suspend fun mkdir(path: String) = withContext(Dispatchers.IO) {
+        val acc = requireAccount()
+        http.newCall(Request.Builder().url(davUrl(acc, path)).header("Authorization", auth(acc)).method("MKCOL", null).build())
+            .execute().use { r ->
+                if (r.code == 401) throw IOException("Nextcloud 로그인이 만료되었습니다. 다시 로그인하세요.")
+                if (!r.isSuccessful && r.code != 405) throw IOException("폴더를 만들 수 없습니다 (HTTP ${r.code}).")
+            }
+    }
+
+    /** Streams a file to [path] with WebDAV PUT. */
+    suspend fun upload(path: String, size: Long, mime: String, open: () -> InputStream, onProgress: (Float?) -> Unit) =
+        withContext(Dispatchers.IO) {
+            val acc = requireAccount()
+            val body = object : RequestBody() {
+                override fun contentType(): MediaType = mime.ifEmpty { "application/octet-stream" }.toMediaType()
+                override fun contentLength() = if (size > 0) size else -1L
+                override fun writeTo(sink: BufferedSink) {
+                    open().use { input ->
+                        val buf = ByteArray(64 * 1024)
+                        var done = 0L
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            sink.write(buf, 0, n)
+                            done += n
+                            onProgress(if (size > 0) done.toFloat() / size else null)
+                        }
+                    }
+                }
+            }
+            http.newCall(Request.Builder().url(davUrl(acc, path)).header("Authorization", auth(acc)).put(body).build())
+                .execute().use { r ->
+                    when {
+                        r.code == 401 -> throw IOException("Nextcloud 로그인이 만료되었습니다. 다시 로그인하세요.")
+                        r.code == 507 -> throw IOException("Nextcloud 저장 공간이 부족합니다.")
+                        !r.isSuccessful -> throw IOException("올리기 실패 (HTTP ${r.code}).")
+                    }
+                }
+        }
 
     private fun requireAccount() = _account.value ?: throw IOException("Nextcloud에 로그인하세요.")
 
