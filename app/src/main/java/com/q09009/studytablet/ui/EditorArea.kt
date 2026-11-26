@@ -61,6 +61,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -68,7 +69,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -88,50 +89,91 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
+private fun defaultWeight(kind: PaneKind) = when (kind) {
+    PaneKind.PDF -> 1.4f
+    PaneKind.DOC -> 1f
+    PaneKind.AUDIO -> 0.8f
+    PaneKind.CHAT -> 0.8f
+}
+
 @Composable
 fun EditorArea(vm: AppViewModel, singlePane: Boolean, modifier: Modifier = Modifier) {
     val editor by vm.editor.collectAsState()
     // Zoom state per PDF tab, kept while the app runs so switching tabs keeps the zoom level.
     val zooms = remember { mutableMapOf<String, PdfZoom>() }
-    var split by remember { mutableFloatStateOf(vm.store.split) }
-    var dragging by remember { mutableStateOf(false) }
+    val weights = remember { mutableStateMapOf<String, Float>().apply { putAll(vm.store.paneWeights) } }
+    var dragging by remember { mutableStateOf(-1) }
 
     BoxWithConstraints(modifier) {
         val total = constraints.maxWidth.toFloat()
-        if (singlePane || editor.panes.size == 1) {
+        if (editor.panes.isEmpty()) {
+            EmptyPane(Modifier.fillMaxSize())
+        } else if (singlePane || editor.panes.size == 1) {
             val i = editor.focused.coerceIn(0, editor.panes.lastIndex)
             PaneView(vm, editor, i, zooms, singlePane, Modifier.fillMaxSize())
         } else {
+            val panes = editor.panes
+            fun w(i: Int) = weights[panes[i].id] ?: defaultWeight(panes[i].kind)
             Row(Modifier.fillMaxSize()) {
-                PaneView(vm, editor, 0, zooms, false, Modifier.weight(split).fillMaxHeight())
-                val handle by animateColorAsState(
-                    if (dragging) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                    label = "handle",
-                )
-                val handleWidth by animateDpAsState(if (dragging) 6.dp else 4.dp, label = "handleWidth")
-                Box(
-                    Modifier
-                        .width(16.dp)
-                        .fillMaxHeight()
-                        .background(MaterialTheme.colorScheme.surfaceContainer)
-                        .pointerInput(total) {
-                            detectHorizontalDragGestures(
-                                onDragStart = { dragging = true },
-                                onDragEnd = { dragging = false; vm.store.split = split },
-                                onDragCancel = { dragging = false; vm.store.split = split },
-                            ) { change, dx ->
-                                change.consume()
-                                split = (split + dx / total).coerceIn(0.2f, 0.8f)
-                            }
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (dragging) VerticalDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
-                    Box(Modifier.size(handleWidth, 48.dp).background(handle, CircleShape))
+                panes.forEachIndexed { i, pane ->
+                    key(pane.id) {
+                        PaneView(vm, editor, i, zooms, false, Modifier.weight(w(i)).fillMaxHeight())
+                    }
+                    if (i < panes.lastIndex) {
+                        val left = rememberUpdatedState(pane.id)
+                        val right = rememberUpdatedState(panes[i + 1].id)
+                        val sum = rememberUpdatedState(panes.indices.sumOf { w(it).toDouble() }.toFloat())
+                        val lw = rememberUpdatedState(w(i))
+                        val rw = rememberUpdatedState(w(i + 1))
+                        SplitHandle(
+                            active = dragging == i,
+                            onStart = { dragging = i },
+                            onEnd = { dragging = -1; vm.store.paneWeights = weights.toMap() },
+                            onDrag = { dx ->
+                                val min = sum.value * 0.12f
+                                val pair = lw.value + rw.value
+                                val l = (lw.value + dx / total * sum.value).coerceIn(min, pair - min)
+                                weights[left.value] = l
+                                weights[right.value] = pair - l
+                            },
+                            key = total,
+                        )
+                    }
                 }
-                PaneView(vm, editor, 1, zooms, false, Modifier.weight(1f - split).fillMaxHeight())
             }
         }
+    }
+}
+
+@Composable
+private fun SplitHandle(active: Boolean, onStart: () -> Unit, onEnd: () -> Unit, onDrag: (Float) -> Unit, key: Any) {
+    val handle by animateColorAsState(
+        if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+        label = "handle",
+    )
+    val handleWidth by animateDpAsState(if (active) 6.dp else 4.dp, label = "handleWidth")
+    val start by rememberUpdatedState(onStart)
+    val end by rememberUpdatedState(onEnd)
+    val drag by rememberUpdatedState(onDrag)
+    Box(
+        Modifier
+            .width(16.dp)
+            .fillMaxHeight()
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .pointerInput(key) {
+                detectHorizontalDragGestures(
+                    onDragStart = { start() },
+                    onDragEnd = { end() },
+                    onDragCancel = { end() },
+                ) { change, dx ->
+                    change.consume()
+                    drag(dx)
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (active) VerticalDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+        Box(Modifier.size(handleWidth, 48.dp).background(handle, CircleShape))
     }
 }
 
@@ -144,7 +186,7 @@ private fun PaneView(
     singlePane: Boolean,
     modifier: Modifier,
 ) {
-    val pane = editor.panes.getOrNull(index) ?: Pane()
+    val pane = editor.panes.getOrNull(index) ?: Pane(PaneKind.DOC)
     val focused = editor.focused == index
     Column(
         modifier.pointerInput(index) {
@@ -189,12 +231,26 @@ private fun TabStrip(vm: AppViewModel, editor: EditorState, index: Int, pane: Pa
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             pane.tabs.forEach { t ->
-                TabChip(vm, index, t, selected = t.key == active, paneFocused = focused)
+                TabChip(vm, editor, index, t, selected = t.key == active, paneFocused = focused)
             }
         }
         if (singlePane && editor.panes.size > 1) {
-            IconButton(onClick = { vm.focusPane(1 - editor.focused.coerceIn(0, 1)) }, Modifier.size(40.dp)) {
-                Text("${editor.focused + 1}/${editor.panes.size}", style = MaterialTheme.typography.labelMedium)
+            var menu by remember { mutableStateOf(false) }
+            Box {
+                TextButton(onClick = { menu = true }, Modifier.height(40.dp)) {
+                    Text("${pane.kind.label} ${editor.focused + 1}/${editor.panes.size}",
+                        style = MaterialTheme.typography.labelMedium)
+                }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    editor.panes.forEachIndexed { i, p ->
+                        DropdownMenuItem(
+                            text = { Text("${p.kind.label} · ${p.activeTab?.title.orEmpty()}", maxLines = 1,
+                                overflow = TextOverflow.Ellipsis) },
+                            leadingIcon = { p.activeTab?.let { Icon(tabIcon(it), null) } },
+                            onClick = { menu = false; vm.focusPane(i) },
+                        )
+                    }
+                }
             }
         }
     }
@@ -202,7 +258,7 @@ private fun TabStrip(vm: AppViewModel, editor: EditorState, index: Int, pane: Pa
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TabChip(vm: AppViewModel, pane: Int, t: TabContent, selected: Boolean, paneFocused: Boolean) {
+private fun TabChip(vm: AppViewModel, editor: EditorState, pane: Int, t: TabContent, selected: Boolean, paneFocused: Boolean) {
     var menu by remember { mutableStateOf(false) }
     val accent = MaterialTheme.colorScheme.primary
     val shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)
@@ -239,9 +295,16 @@ private fun TabChip(vm: AppViewModel, pane: Int, t: TabContent, selected: Boolea
             )
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(text = { Text("다른 쪽 창으로 이동") },
-                leadingIcon = { Icon(Icons.AutoMirrored.Filled.CallSplit, null) },
-                onClick = { menu = false; vm.moveTab(pane, t.key) })
+            val label = when {
+                editor.sibling(pane) >= 0 -> "옆 ${t.kind.label} 창으로 이동"
+                editor.canSplit(pane) -> "새 ${t.kind.label} 창으로 분리"
+                else -> null
+            }
+            if (label != null) {
+                DropdownMenuItem(text = { Text(label) },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.CallSplit, null) },
+                    onClick = { menu = false; vm.moveTab(pane, t.key) })
+            }
             DropdownMenuItem(text = { Text("닫기") },
                 leadingIcon = { Icon(Icons.Default.Close, null) },
                 onClick = { menu = false; vm.closeTab(pane, t.key) })

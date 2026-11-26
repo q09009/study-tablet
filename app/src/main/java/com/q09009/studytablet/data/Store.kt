@@ -21,9 +21,13 @@ class Store(context: Context) {
         get() = prefs.getString("editor", null)
         set(v) = prefs.edit().putString("editor", v).apply()
 
-    var split: Float
-        get() = prefs.getFloat("split", 0.5f).coerceIn(0.2f, 0.8f)
-        set(v) = prefs.edit().putFloat("split", v).apply()
+    /** Relative pane widths keyed by pane id, as "id=weight;id=weight". */
+    var paneWeights: Map<String, Float>
+        get() = prefs.getString("paneWeights", "").orEmpty().split(';').mapNotNull { e ->
+            val (k, v) = e.split('=').takeIf { it.size == 2 } ?: return@mapNotNull null
+            v.toFloatOrNull()?.let { k to it }
+        }.toMap()
+        set(v) = prefs.edit().putString("paneWeights", v.entries.joinToString(";") { "${it.key}=${it.value}" }).apply()
 
     /** Live transcription language: "ko", "en" or "ko+en". */
     var transcribeLang: String

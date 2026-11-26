@@ -435,13 +435,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openRecorder() = openTool(TabContent.Recorder)
 
-    /** Shows a tool tab (chat, recorder) beside the current tab when there is one, or focuses it if already open. */
-    private fun openTool(content: TabContent) {
-        val s = _editor.value
-        val pane = s.findPane(content.key)
-        if (pane >= 0) setEditor(s.activate(pane, content.key))
-        else openTab(content, toSide = s.focusedTab != null)
-    }
+    /** Shows a tool tab (chat, recorder) in its own pane, or focuses it if already open. */
+    private fun openTool(content: TabContent) = openTab(content)
 
     fun closeChat() {
         val s = _editor.value
@@ -773,12 +768,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun openBeside(content: TabContent) {
-        val e = _editor.value
-        val pdfPane = e.focused
-        val inOther = e.findPane(content.key).let { it >= 0 && it != pdfPane }
-        setEditor(if (inOther) e.open(content) else e.open(content, toSide = true))
-    }
+    private fun openBeside(content: TabContent) = openTab(content)
 
     private suspend fun runSummary(pdf: TabContent.Pdf, dir: Uri?, existing: FsNode?, key: String) {
         fun set(f: (SummaryState) -> SummaryState) =
