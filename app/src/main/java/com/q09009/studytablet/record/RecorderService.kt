@@ -66,7 +66,7 @@ class RecorderService : Service() {
                 Uri.parse(intent.getStringExtra(EXTRA_DIR)!!),
                 intent.getStringExtra(EXTRA_NAME)!!,
                 intent.getStringExtra(EXTRA_TITLE).orEmpty(),
-                intent.getBooleanExtra(EXTRA_TRANSCRIBE, true),
+                intent.getStringArrayListExtra(EXTRA_LANGS).orEmpty(),
             )
             ACTION_PAUSE -> pauseOrResume()
             ACTION_STOP -> stopRecording()
@@ -75,7 +75,8 @@ class RecorderService : Service() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun start(dir: Uri, name: String, title: String, transcribe: Boolean) {
+    private fun start(dir: Uri, name: String, title: String, langs: List<String>) {
+        val transcribe = langs.isNotEmpty()
         if (thread != null || stopping) return
         val file = File(cacheDir, "recording-${System.currentTimeMillis()}.m4a")
         ServiceCompat.startForeground(
@@ -107,7 +108,7 @@ class RecorderService : Service() {
             available = canTranscribe && transcribe,
             status = if (!canTranscribe) "실시간 전사는 Android 13 이상에서 지원됩니다. 녹음만 진행합니다." else null,
         )
-        val tr = if (canTranscribe && transcribe) newTranscriber() else null
+        val tr = if (canTranscribe && transcribe) newTranscriber(langs) else null
         transcriber = tr
         tr?.start()
         _state.value = RecordingState(file, dir, name, SystemClock.elapsedRealtime())
@@ -132,8 +133,8 @@ class RecorderService : Service() {
     }
 
     @androidx.annotation.RequiresApi(33)
-    private fun newTranscriber() = LiveTranscriber(
-        this, RATE, "ko-KR",
+    private fun newTranscriber(langs: List<String>) = LiveTranscriber(
+        this, RATE, langs,
         onFinal = { text ->
             val at = segmentStartMs ?: _state.value?.elapsedMs() ?: 0
             segmentStartMs = null
@@ -252,7 +253,7 @@ class RecorderService : Service() {
         private const val EXTRA_DIR = "dir"
         private const val EXTRA_NAME = "name"
         private const val EXTRA_TITLE = "title"
-        private const val EXTRA_TRANSCRIBE = "transcribe"
+        private const val EXTRA_LANGS = "langs"
         private const val NOTIFICATION_ID = 42
 
         fun stamp(ms: Long): String {
@@ -281,12 +282,13 @@ class RecorderService : Service() {
 
         fun clearError() { _error.value = null }
 
-        fun start(context: Context, dir: Uri, name: String, title: String, transcribe: Boolean = true) {
+        /** [langs] are BCP-47 tags to transcribe (first is primary); empty = record only. */
+        fun start(context: Context, dir: Uri, name: String, title: String, langs: List<String>) {
             ContextCompat.startForegroundService(
                 context,
                 Intent(context, RecorderService::class.java).setAction(ACTION_START)
                     .putExtra(EXTRA_DIR, dir.toString()).putExtra(EXTRA_NAME, name).putExtra(EXTRA_TITLE, title)
-                    .putExtra(EXTRA_TRANSCRIBE, transcribe),
+                    .putStringArrayListExtra(EXTRA_LANGS, ArrayList(langs)),
             )
         }
 

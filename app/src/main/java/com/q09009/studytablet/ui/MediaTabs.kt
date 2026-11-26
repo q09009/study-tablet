@@ -52,6 +52,7 @@ import com.q09009.studytablet.record.RecorderService
 import com.q09009.studytablet.record.Transcript
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.Switch
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
@@ -66,6 +67,7 @@ fun RecorderTab(vm: AppViewModel, modifier: Modifier = Modifier) {
     val recError by RecorderService.error.collectAsState()
     val transcript by RecorderService.transcript.collectAsState()
     var transcribe by rememberSaveable { mutableStateOf(Build.VERSION.SDK_INT >= 33) }
+    val lang by vm.transcribeLang.collectAsState()
 
     val permissions = buildList {
         add(Manifest.permission.RECORD_AUDIO)
@@ -98,6 +100,22 @@ fun RecorderTab(vm: AppViewModel, modifier: Modifier = Modifier) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("실시간 전사", style = MaterialTheme.typography.bodyMedium)
                         Switch(checked = transcribe, onCheckedChange = { transcribe = it })
+                    }
+                    if (transcribe) {
+                        val options = buildList {
+                            add("ko" to "한국어")
+                            add("en" to "English")
+                            if (Build.VERSION.SDK_INT >= 34) add("ko+en" to "한국어 + English")
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            options.forEach { (value, label) ->
+                                FilterChip(selected = lang == value, onClick = { vm.setTranscribeLang(value) },
+                                    label = { Text(label) })
+                            }
+                        }
+                        if (lang == "ko+en") Text("말하는 언어를 감지해 문장마다 한국어/영어로 바꿔 적습니다.",
+                            style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 Text(

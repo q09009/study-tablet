@@ -3,11 +3,14 @@ package com.q09009.studytablet.record
 import android.content.Context
 import android.content.Intent
 import android.media.AudioFormat
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.speech.RecognitionListener
+import android.speech.RecognitionSupport
+import android.speech.RecognitionSupportCallback
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.annotation.RequiresApi
@@ -23,7 +26,7 @@ import java.util.concurrent.LinkedBlockingQueue
 class LiveTranscriber(
     private val context: Context,
     private val sampleRate: Int,
-    private val language: String,
+    private val languages: List<String>,
     private val onFinal: (String) -> Unit,
     private val onPartial: (String) -> Unit,
     private val onStatus: (String?) -> Unit,
@@ -51,7 +54,25 @@ class LiveTranscriber(
 
     fun start() {
         writer.start()
-        main.post(::session)
+        main.post {
+            if (onDevice) ensureModels()
+            session()
+        }
+    }
+
+    /** Asks the system to download any on-device language pack we need that isn't installed yet. */
+    private fun ensureModels() {
+        val probe = runCatching { SpeechRecognizer.createOnDeviceSpeechRecognizer(context) }.getOrNull() ?: return
+        probe.checkRecognitionSupport(intent(null), context.mainExecutor, object : RecognitionSupportCallback {
+            override fun onSupportResult(support: RecognitionSupport) {
+                val have = support.installedOnDeviceLanguages + support.pendingOnDeviceLanguages
+                languages.filter { l -> have.none { it.equals(l, true) } }.forEach { l ->
+                    runCatching { probe.triggerModelDownload(intent(null, l)) }
+                }
+                main.postDelayed({ probe.destroy() }, 2000)
+            }
+            override fun onError(error: Int) { probe.destroy() }
+        })
     }
 
     fun feed(pcm: ByteArray, len: Int) {
@@ -85,10 +106,19 @@ class LiveTranscriber(
         r.startListening(intent(pipe[0]))
     }
 
-    private fun intent(source: ParcelFileDescriptor?) = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+    private fun intent(source: ParcelFileDescriptor?, language: String = languages.first()) =
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
         putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        if (languages.size > 1 && Build.VERSION.SDK_INT >= 34) {
+            // Let the recognizer switch between the given languages mid-session (e.g. Korean lecture with English).
+            val allowed = ArrayList(languages)
+            putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_DETECTION, true)
+            putStringArrayListExtra(RecognizerIntent.EXTRA_LANGUAGE_DETECTION_ALLOWED_LANGUAGES, allowed)
+            putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH, RecognizerIntent.LANGUAGE_SWITCH_BALANCED)
+            putStringArrayListExtra(RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES, allowed)
+        }
         if (source != null) {
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, source)
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)

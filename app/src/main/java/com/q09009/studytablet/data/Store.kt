@@ -25,6 +25,11 @@ class Store(context: Context) {
         get() = prefs.getFloat("split", 0.5f).coerceIn(0.2f, 0.8f)
         set(v) = prefs.edit().putFloat("split", v).apply()
 
+    /** Live transcription language: "ko", "en" or "ko+en". */
+    var transcribeLang: String
+        get() = prefs.getString("transcribeLang", "ko") ?: "ko"
+        set(v) = prefs.edit().putString("transcribeLang", v).apply()
+
     var theme: String
         get() = prefs.getString("theme", "system") ?: "system"
         set(v) = prefs.edit().putString("theme", v).apply()

@@ -827,7 +827,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val dir = requireDir() ?: return false
         val name = "녹음 " + SimpleDateFormat("yyyy-MM-dd HH.mm", Locale.getDefault()).format(Date()) + ".m4a"
         val title = _editor.value.focusedTab?.takeIf { it !is TabContent.Recorder }?.title ?: "강의 녹음"
-        RecorderService.start(getApplication(), dir, name, title, transcribe)
+        val langs = when (_transcribeLang.value) {
+            "en" -> listOf("en-US")
+            "ko+en" -> listOf("ko-KR", "en-US")
+            else -> listOf("ko-KR")
+        }
+        RecorderService.start(getApplication(), dir, name, title, if (transcribe) langs else emptyList())
         return true
     }
 
@@ -905,6 +910,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         ThemeMode.entries.firstOrNull { it.name.equals(store.theme, true) } ?: ThemeMode.SYSTEM
     )
     val theme: StateFlow<ThemeMode> = _theme
+
+    private val _transcribeLang = MutableStateFlow(store.transcribeLang)
+    val transcribeLang: StateFlow<String> = _transcribeLang
+
+    fun setTranscribeLang(value: String) {
+        store.transcribeLang = value
+        _transcribeLang.value = value
+    }
 
     fun setTheme(mode: ThemeMode) {
         store.theme = mode.name.lowercase()
