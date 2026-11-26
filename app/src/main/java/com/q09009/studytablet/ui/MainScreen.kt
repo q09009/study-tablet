@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Forum
@@ -60,7 +61,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.q09009.studytablet.record.RecorderService
 
-private enum class SideView { EXPLORER, SETTINGS }
+private enum class SideView { EXPLORER, CLOUD, SETTINGS }
 
 @Composable
 fun AppRoot(vm: AppViewModel) {
@@ -98,6 +99,7 @@ fun AppRoot(vm: AppViewModel) {
                         onImport = { importer.launch(arrayOf("application/pdf")) },
                         modifier = m,
                     )
+                    SideView.CLOUD -> CloudPanel(vm, m)
                     SideView.SETTINGS -> SettingsPanel(vm, m)
                     null -> {}
                 }
@@ -112,6 +114,9 @@ fun AppRoot(vm: AppViewModel) {
                 ) {
                     ActivityIcon(Icons.Default.Folder, "탐색기", side == SideView.EXPLORER) {
                         side = if (side == SideView.EXPLORER) null else SideView.EXPLORER
+                    }
+                    ActivityIcon(Icons.Default.Cloud, "Nextcloud", side == SideView.CLOUD) {
+                        side = if (side == SideView.CLOUD) null else SideView.CLOUD
                     }
                     ActivityIcon(Icons.Default.Forum, "AI에게 질문", chatOpen) {
                         if (chatOpen) vm.closeChat() else vm.openChat()

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
@@ -68,6 +69,7 @@ import com.q09009.studytablet.data.FsNode
 
 private data class TreeItem(val node: FsNode, val depth: Int)
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun Explorer(vm: AppViewModel, onPickFolder: () -> Unit, onImport: () -> Unit, modifier: Modifier = Modifier) {
     val root by vm.root.collectAsState()
@@ -97,6 +99,9 @@ fun Explorer(vm: AppViewModel, onPickFolder: () -> Unit, onImport: () -> Unit, m
                         DropdownMenuItem(text = { Text("PDF 가져오기") },
                             leadingIcon = { Icon(Icons.Default.FileUpload, null) },
                             onClick = { menuOpen = false; onImport() })
+                        DropdownMenuItem(text = { Text("AI로 과목 정리") },
+                            leadingIcon = { Icon(Icons.Default.AutoAwesome, null) },
+                            onClick = { menuOpen = false; vm.startOrganize() })
                         DropdownMenuItem(text = { Text("새로고침") },
                             leadingIcon = { Icon(Icons.Default.Refresh, null) },
                             onClick = { menuOpen = false; vm.refresh() })
@@ -140,6 +145,23 @@ fun Explorer(vm: AppViewModel, onPickFolder: () -> Unit, onImport: () -> Unit, m
             is TabContent.Audio -> t.uri
             else -> null
         }
+        val unsorted = children[r.uri].orEmpty().count { it.kind == FileKind.PDF }
+        if (unsorted > 0) {
+            Row(
+                Modifier.fillMaxWidth().padding(8.dp).clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.secondaryContainer)
+                    .combinedClickable(onClick = vm::startOrganize)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                Spacer(Modifier.width(8.dp))
+                Text("정리 안 된 PDF ${unsorted}개", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer)
+                Text("AI 정리", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary)
+            }
+        }
         if (rows.isEmpty()) {
             Text("비어 있는 폴더입니다. 위의 버튼으로 메모를 만들거나 ⋮ 메뉴에서 PDF를 가져오세요.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
@@ -156,6 +178,7 @@ fun Explorer(vm: AppViewModel, onPickFolder: () -> Unit, onImport: () -> Unit, m
         }
     }
 
+    OrganizeDialog(vm)
     if (newFolder) {
         NameDialog("새 폴더", "", onDismiss = { newFolder = false }) { vm.newFolder(it); newFolder = false }
     }

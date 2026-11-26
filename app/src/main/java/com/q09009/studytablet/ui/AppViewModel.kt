@@ -8,22 +8,28 @@ import androidx.lifecycle.viewModelScope
 import com.q09009.studytablet.ai.ChatMessage
 import com.q09009.studytablet.ai.CodexClient
 import com.q09009.studytablet.ai.ModelOption
+import com.q09009.studytablet.ai.PdfClassifier
 import com.q09009.studytablet.ai.PdfSummarizer
 import com.q09009.studytablet.auth.CodexAuth
 import com.q09009.studytablet.data.FileKind
 import com.q09009.studytablet.data.FsNode
+import com.q09009.studytablet.data.CloudEntry
+import com.q09009.studytablet.data.NcAccount
+import com.q09009.studytablet.data.Nextcloud
 import com.q09009.studytablet.data.Store
 import com.q09009.studytablet.data.Workspace
 import com.q09009.studytablet.record.RecorderService
 import com.q09009.studytablet.update.ReleaseInfo
 import com.q09009.studytablet.update.Updater
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -295,16 +301,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (node.isDir) {
                     forgetDir(node.uri)
                 } else {
-                    val tabs = _editor.value.panes.flatMap { it.tabs }
-                    tabs.filter { tabUri(it) == node.uri }.forEach { t ->
-                        val replaced = when (t) {
-                            is TabContent.Pdf -> t.copy(uri = newUri, name = clean)
-                            is TabContent.Text -> t.copy(uri = newUri, name = clean)
-                            is TabContent.Audio -> t.copy(uri = newUri, name = clean)
-                            else -> t
-                        }
-                        setEditor(_editor.value.replace(t.key, replaced))
-                    }
+                    retarget(node.uri, newUri, clean, null)
                 }
                 if (_selected.value?.uri == node.uri) _selected.value = null
                 node.parent?.let { refresh(it) } ?: refresh()
@@ -405,6 +402,229 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val s = _editor.value
         val pane = s.panes.indexOfFirst { p -> p.tabs.any { it is TabContent.Chat } }
         if (pane >= 0) closeTab(pane, TabContent.Chat.key)
+    }
+
+    // ---- Nextcloud ----
+
+    val nextcloud = Nextcloud(app, http)
+    val ncAccount: StateFlow<NcAccount?> = nextcloud.account
+    private val _cloud = MutableStateFlow(CloudState())
+    val cloud: StateFlow<CloudState> = _cloud
+    private var ncLoginJob: Job? = null
+    private var cloudListJob: Job? = null
+
+    fun ncLogin(server: String) {
+        if (server.isBlank() || ncLoginJob?.isActive == true) return
+        ncLoginJob = viewModelScope.launch {
+            _cloud.update { it.copy(loginBusy = true, error = null) }
+            try {
+                nextcloud.login(server)
+                openCloud("/")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _cloud.update { it.copy(error = e.message ?: e.toString()) }
+            } finally {
+                _cloud.update { it.copy(loginBusy = false) }
+            }
+        }
+    }
+
+    fun cancelNcLogin() {
+        ncLoginJob?.cancel()
+        _cloud.update { it.copy(loginBusy = false) }
+    }
+
+    fun ncLogout() {
+        viewModelScope.launch {
+            nextcloud.logout()
+            _cloud.value = CloudState()
+        }
+    }
+
+    fun openCloud(path: String) {
+        cloudListJob?.cancel()
+        cloudListJob = viewModelScope.launch {
+            _cloud.update { it.copy(path = path, loading = true, error = null) }
+            try {
+                val list = nextcloud.list(path)
+                _cloud.update { it.copy(entries = list, loading = false, loaded = true) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _cloud.update { it.copy(loading = false, error = e.message ?: e.toString()) }
+            }
+        }
+    }
+
+    /** Downloads a Nextcloud file (or a whole folder) into the explorer's target folder. */
+    fun downloadCloud(entry: CloudEntry, openAfter: Boolean = false) {
+        val dir = requireDir() ?: return
+        if (entry.path in _cloud.value.downloading) return
+        viewModelScope.launch {
+            try {
+                if (entry.isDir) {
+                    val n = downloadDir(entry, dir)
+                    _message.value = "'${entry.name}' 받기 완료 (파일 ${n}개)"
+                } else {
+                    val node = downloadFile(entry, dir)
+                    if (openAfter && node.kind != FileKind.OTHER) open(node)
+                }
+                expand(dir)
+                refresh(dir)
+            } catch (e: Exception) {
+                fail(e)
+            }
+        }
+    }
+
+    private suspend fun downloadFile(entry: CloudEntry, dir: Uri): FsNode {
+        val local = ws.list(dir)
+        local.firstOrNull { !it.isDir && it.name == entry.name && (entry.size <= 0 || it.size == entry.size) }
+            ?.let { return it }
+        val name = if (local.none { it.name == entry.name }) entry.name else {
+            val ext = entry.name.substringAfterLast('.', "")
+            if (ext.isEmpty()) uniqueName(dir, entry.name, "bin") else uniqueName(dir, entry.name.substringBeforeLast('.'), ext)
+        }
+        val mime = if (name.endsWith(".pdf", true)) "application/pdf" else "application/octet-stream"
+        val uri = ws.createFile(dir, name, mime)
+        _cloud.update { it.copy(downloading = it.downloading + (entry.path to 0f)) }
+        try {
+            withContext(Dispatchers.IO) {
+                ws.openOutput(uri).use { out ->
+                    var last = -1
+                    nextcloud.download(entry.path, out) { p ->
+                        val pct = ((p ?: 0f) * 100).toInt()
+                        if (pct != last) {
+                            last = pct
+                            _cloud.update { s -> s.copy(downloading = s.downloading + (entry.path to (p ?: -1f))) }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            runCatching { ws.delete(uri) }
+            throw e
+        } finally {
+            _cloud.update { it.copy(downloading = it.downloading - entry.path) }
+        }
+        return FsNode(uri, name, false, mime, entry.size, entry.modified, dir)
+    }
+
+    private suspend fun downloadDir(entry: CloudEntry, parent: Uri): Int {
+        val dir = ws.list(parent).firstOrNull { it.isDir && it.name == entry.name }?.uri
+            ?: ws.createDir(parent, entry.name)
+        _cloud.update { it.copy(downloading = it.downloading + (entry.path to -1f)) }
+        try {
+            var count = 0
+            nextcloud.list(entry.path).forEach { child ->
+                count += if (child.isDir) downloadDir(child, dir) else { downloadFile(child, dir); 1 }
+            }
+            return count
+        } finally {
+            _cloud.update { it.copy(downloading = it.downloading - entry.path) }
+        }
+    }
+
+    // ---- AI organize ----
+
+    private val _organize = MutableStateFlow(OrganizeState())
+    val organize: StateFlow<OrganizeState> = _organize
+    private var organizeJob: Job? = null
+
+    /** Classifies the PDFs lying directly in the workspace root into subjects (shown for confirmation). */
+    fun startOrganize() {
+        val r = _root.value ?: return
+        if (account.value == null) {
+            _message.value = "설정에서 ChatGPT로 로그인하면 AI 정리를 쓸 수 있습니다."
+            return
+        }
+        organizeJob?.cancel()
+        organizeJob = viewModelScope.launch {
+            _organize.value = OrganizeState(open = true, running = true, status = "준비 중…")
+            try {
+                val top = ws.list(r.uri)
+                _children.update { it + (r.uri to top) }
+                val pdfs = top.filter { it.kind == FileKind.PDF }
+                if (pdfs.isEmpty()) {
+                    _organize.value = OrganizeState()
+                    _message.value = "작업 폴더 바로 아래에 정리할 PDF가 없습니다."
+                    return@launch
+                }
+                val subjects = top.filter { it.isDir }.map { it.name }
+                val result = PdfClassifier.classify(
+                    getApplication(), codex, _model.value, pdfs.map { it.name to it.uri }, subjects,
+                ) { s -> _organize.update { it.copy(status = s) } }
+                _organize.value = OrganizeState(
+                    open = true,
+                    items = pdfs.zip(result) { f, s -> OrganizeItem(f, s) },
+                    subjects = (subjects + result).distinct(),
+                    existing = subjects.toSet(),
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _organize.update { it.copy(running = false, status = null, error = e.message ?: e.toString()) }
+            }
+        }
+    }
+
+    fun updateOrganize(index: Int, item: OrganizeItem) =
+        _organize.update { s -> s.copy(items = s.items.toMutableList().also { it[index] = item }) }
+
+    fun dismissOrganize() {
+        organizeJob?.cancel()
+        _organize.value = OrganizeState()
+    }
+
+    /** Moves the checked PDFs (and their saved summaries) into their subject folders, creating folders as needed. */
+    fun applyOrganize() {
+        val r = _root.value ?: return
+        val items = _organize.value.items.filter { it.checked && it.subject.isNotBlank() }
+        if (items.isEmpty()) return dismissOrganize()
+        organizeJob = viewModelScope.launch {
+            _organize.update { it.copy(running = true, status = "이동 중…", error = null) }
+            try {
+                val top = ws.list(r.uri)
+                val dirs = top.filter { it.isDir }.associate { it.name to it.uri }.toMutableMap()
+                items.forEachIndexed { i, item ->
+                    val subject = PdfClassifier.sanitize(item.subject)
+                    val dir = dirs[subject] ?: ws.createDir(r.uri, subject).also { dirs[subject] = it }
+                    moveInto(item.file, dir)
+                    val summary = "${item.file.name.substringBeforeLast('.')} 요약.md"
+                    top.firstOrNull { !it.isDir && it.name == summary }?.let { moveInto(it, dir) }
+                    _organize.update { it.copy(status = "이동 중… (${i + 1}/${items.size})") }
+                }
+                _organize.value = OrganizeState()
+                _children.update { m -> m.filterKeys { it == r.uri || it in _expanded.value } }
+                refresh()
+                _message.value = "PDF ${items.size}개를 과목 폴더로 정리했습니다."
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _organize.update { it.copy(running = false, status = null, error = e.message ?: e.toString()) }
+                refresh()
+            }
+        }
+    }
+
+    private suspend fun moveInto(node: FsNode, dir: Uri) {
+        val newUri = ws.move(node, dir)
+        retarget(node.uri, newUri, node.name, dir)
+        if (_selected.value?.uri == node.uri) _selected.value = null
+    }
+
+    /** Points open tabs at a file's new location after a rename or move. */
+    private fun retarget(old: Uri, new: Uri, name: String, parent: Uri?) {
+        _editor.value.panes.flatMap { it.tabs }.filter { tabUri(it) == old }.forEach { t ->
+            val replaced = when (t) {
+                is TabContent.Pdf -> t.copy(uri = new, name = name, parent = parent ?: t.parent)
+                is TabContent.Text -> t.copy(uri = new, name = name, parent = parent ?: t.parent)
+                is TabContent.Audio -> t.copy(uri = new, name = name)
+                else -> t
+            }
+            setEditor(_editor.value.replace(t.key, replaced))
+        }
     }
 
     // ---- Summaries ----
@@ -651,6 +871,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (docName != null) append(" The student is currently viewing lecture material titled \"$docName\".")
     }
 }
+
+data class CloudState(
+    val path: String = "/",
+    val entries: List<CloudEntry> = emptyList(),
+    val loading: Boolean = false,
+    val loaded: Boolean = false,
+    val error: String? = null,
+    val loginBusy: Boolean = false,
+    /** Remote path -> progress (0..1, or -1 when unknown). */
+    val downloading: Map<String, Float> = emptyMap(),
+)
+
+data class OrganizeItem(val file: FsNode, val subject: String, val checked: Boolean = true)
+
+data class OrganizeState(
+    val open: Boolean = false,
+    val running: Boolean = false,
+    val status: String? = null,
+    val items: List<OrganizeItem> = emptyList(),
+    val subjects: List<String> = emptyList(),
+    val existing: Set<String> = emptySet(),
+    val error: String? = null,
+)
 
 data class UpdateState(
     val checking: Boolean = false,

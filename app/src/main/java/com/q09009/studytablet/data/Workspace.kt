@@ -118,6 +118,20 @@ class Workspace(context: Context) {
 
     suspend fun find(dir: Uri, name: String): FsNode? = list(dir).firstOrNull { it.name == name }
 
+    /** Moves [node] into [target]; falls back to copy + delete when the provider can't move. Returns the new uri. */
+    suspend fun move(node: FsNode, target: Uri): Uri = withContext(Dispatchers.IO) {
+        val parent = node.parent ?: throw IOException("이동할 수 없습니다: ${node.name}")
+        runCatching { DocumentsContract.moveDocument(cr, node.uri, parent, target) }.getOrNull()?.let { return@withContext it }
+        if (node.isDir) throw IOException("폴더를 이동할 수 없습니다: ${node.name}")
+        val dst = DocumentsContract.createDocument(cr, target, node.mime.ifEmpty { "application/octet-stream" }, node.name)
+            ?: throw IOException("만들 수 없습니다: ${node.name}")
+        cr.openInputStream(node.uri)!!.use { input -> cr.openOutputStream(dst, "w")!!.use { input.copyTo(it) } }
+        DocumentsContract.deleteDocument(cr, node.uri)
+        dst
+    }
+
+    fun openOutput(uri: Uri) = cr.openOutputStream(uri, "w") ?: throw IOException("파일에 쓸 수 없습니다.")
+
     /** Copies a content uri (e.g. a picked PDF) into [dir]. */
     suspend fun importUri(dir: Uri, src: Uri, name: String, mime: String): Uri {
         val dst = createFile(dir, name, mime)
