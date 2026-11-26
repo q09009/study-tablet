@@ -292,6 +292,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (dir != _root.value?.uri) _expanded.update { it + dir }
     }
 
+    /** Opens [dir] in the tree (e.g. while dragging over it) and loads its children. */
+    fun expandDir(dir: Uri) {
+        if (dir == _root.value?.uri || dir in _expanded.value) return
+        _expanded.update { it + dir }
+        refresh(dir)
+    }
+
     fun rename(node: FsNode, newName: String) {
         val clean = newName.trim()
         if (clean.isEmpty() || clean == node.name) return
