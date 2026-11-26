@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -191,6 +192,7 @@ private fun TreeRow(vm: AppViewModel, row: TreeItem, isExpanded: Boolean, highli
     var menu by remember { mutableStateOf(false) }
     var rename by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf(false) }
+    var move by remember { mutableStateOf(false) }
     val bg = when {
         highlighted -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
         selected -> MaterialTheme.colorScheme.surfaceContainerHighest
@@ -229,6 +231,9 @@ private fun TreeRow(vm: AppViewModel, row: TreeItem, isExpanded: Boolean, highli
             DropdownMenuItem(text = { Text("이름 변경") },
                 leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, null) },
                 onClick = { menu = false; rename = true })
+            DropdownMenuItem(text = { Text("이동…") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, null) },
+                onClick = { menu = false; move = true })
             DropdownMenuItem(text = { Text("삭제") },
                 leadingIcon = { Icon(Icons.Default.Delete, null) },
                 onClick = { menu = false; delete = true })
@@ -237,6 +242,7 @@ private fun TreeRow(vm: AppViewModel, row: TreeItem, isExpanded: Boolean, highli
     if (rename) {
         NameDialog("이름 변경", n.name, onDismiss = { rename = false }) { vm.rename(n, it); rename = false }
     }
+    if (move) MoveDialog(vm, n, onDismiss = { move = false })
     if (delete) {
         AlertDialog(
             onDismissRequest = { delete = false },

@@ -326,6 +326,44 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    suspend fun subfolders(dir: Uri): List<FsNode> = ws.list(dir).filter { it.isDir }
+
+    /** True if [node] may be moved into [target] (not its current folder, not itself or its own subfolder). */
+    fun canMove(node: FsNode, target: Uri): Boolean =
+        target != node.parent && target != node.uri && !(node.isDir && isInside(target, node.uri))
+
+    /** Moves a file or folder into [target]; a PDF's saved "<name> 요약.md" moves with it. */
+    fun moveTo(node: FsNode, target: Uri) {
+        if (!canMove(node, target)) return
+        viewModelScope.launch {
+            try {
+                val existing = ws.list(target).map { it.name }.toSet()
+                if (node.name in existing) {
+                    _message.value = "이동할 폴더에 같은 이름이 이미 있습니다: ${node.name}"
+                    return@launch
+                }
+                val summary = if (node.kind == FileKind.PDF) {
+                    val name = "${node.name.substringBeforeLast('.')} 요약.md"
+                    node.parent?.let { ws.find(it, name) }?.takeIf { it.name !in existing }
+                } else null
+                if (node.isDir) {
+                    ws.move(node, target)
+                    forgetDir(node.uri)
+                    if (_selected.value?.uri == node.uri) _selected.value = null
+                } else {
+                    moveInto(node, target)
+                }
+                summary?.let { moveInto(it, target) }
+                expand(target)
+                node.parent?.let { refresh(it) }
+                refresh(target)
+            } catch (e: Exception) {
+                fail(e)
+                node.parent?.let { refresh(it) }
+            }
+        }
+    }
+
     /** Drops tree state and open tabs that live inside a renamed or deleted folder. */
     private fun forgetDir(dir: Uri) {
         _expanded.update { set -> set.filterNot { it == dir || isInside(it, dir) }.toSet() }
