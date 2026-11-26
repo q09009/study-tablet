@@ -823,11 +823,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Recording ----
 
     /** Returns false when there is no folder to save into. */
-    fun startRecording(): Boolean {
+    fun startRecording(transcribe: Boolean = true): Boolean {
         val dir = requireDir() ?: return false
         val name = "녹음 " + SimpleDateFormat("yyyy-MM-dd HH.mm", Locale.getDefault()).format(Date()) + ".m4a"
         val title = _editor.value.focusedTab?.takeIf { it !is TabContent.Recorder }?.title ?: "강의 녹음"
-        RecorderService.start(getApplication(), dir, name, title)
+        RecorderService.start(getApplication(), dir, name, title, transcribe)
         return true
     }
 

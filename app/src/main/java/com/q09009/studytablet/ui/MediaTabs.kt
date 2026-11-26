@@ -49,6 +49,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.q09009.studytablet.record.RecorderService
+import com.q09009.studytablet.record.Transcript
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.PaddingValues
 import kotlinx.coroutines.delay
 
 @Composable
@@ -56,16 +64,18 @@ fun RecorderTab(vm: AppViewModel, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val recording by RecorderService.state.collectAsState()
     val recError by RecorderService.error.collectAsState()
+    val transcript by RecorderService.transcript.collectAsState()
+    var transcribe by rememberSaveable { mutableStateOf(Build.VERSION.SDK_INT >= 33) }
 
     val permissions = buildList {
         add(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
     }.toTypedArray()
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
-        if (res[Manifest.permission.RECORD_AUDIO] == true) vm.startRecording()
+        if (res[Manifest.permission.RECORD_AUDIO] == true) vm.startRecording(transcribe)
     }
 
-    Box(modifier.padding(24.dp), contentAlignment = Alignment.Center) {
+    Column(modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Column(
             Modifier.widthIn(max = 420.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -77,13 +87,22 @@ fun RecorderTab(vm: AppViewModel, modifier: Modifier = Modifier) {
                     onClick = {
                         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
                             PackageManager.PERMISSION_GRANTED
-                        if (granted) vm.startRecording() else permLauncher.launch(permissions)
+                        if (granted) vm.startRecording(transcribe) else permLauncher.launch(permissions)
                     },
+                    enabled = !transcript.finishing,
                     modifier = Modifier.size(96.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.error),
                 ) { Icon(Icons.Default.Mic, "녹음 시작", Modifier.size(48.dp)) }
                 Text("녹음 시작", style = MaterialTheme.typography.titleMedium)
-                Text("녹음 파일은 탐색기에서 선택한 폴더(없으면 작업 폴더)에 저장됩니다.",
+                if (Build.VERSION.SDK_INT >= 33) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("실시간 전사", style = MaterialTheme.typography.bodyMedium)
+                        Switch(checked = transcribe, onCheckedChange = { transcribe = it })
+                    }
+                }
+                Text(
+                    if (transcribe) "녹음 파일과 전사(…전사.md)는 탐색기에서 선택한 폴더(없으면 작업 폴더)에 저장됩니다."
+                    else "녹음 파일은 탐색기에서 선택한 폴더(없으면 작업 폴더)에 저장됩니다.",
                     style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
@@ -105,9 +124,50 @@ fun RecorderTab(vm: AppViewModel, modifier: Modifier = Modifier) {
                     }
                 }
             }
+            if (transcript.finishing) Text("마지막 문장을 전사하고 저장하는 중…",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            transcript.status?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             recError?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
                 LaunchedEffect(it) { delay(8000); RecorderService.clearError() }
+            }
+        }
+        val showTranscript = transcript.available &&
+            (recording != null || transcript.finishing || transcript.lines.isNotEmpty())
+        if (showTranscript) {
+            Spacer(Modifier.height(16.dp))
+            TranscriptView(transcript, Modifier.fillMaxWidth().weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun TranscriptView(t: Transcript, modifier: Modifier = Modifier) {
+    val list = rememberLazyListState()
+    val count = t.lines.size + if (t.partial.isNotEmpty()) 1 else 0
+    LaunchedEffect(count, t.partial) { if (count > 0) list.animateScrollToItem(count - 1) }
+    Surface(modifier, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        if (count == 0) {
+            Box(Modifier.padding(16.dp), contentAlignment = Alignment.Center) {
+                Text("말하면 여기에 실시간으로 받아 적습니다.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            return@Surface
+        }
+        LazyColumn(state = list, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(t.lines) { line ->
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(RecorderService.stamp(line.atMs), style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp))
+                    Text(line.text, style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+            if (t.partial.isNotEmpty()) item {
+                Text(t.partial, style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 52.dp))
             }
         }
     }
